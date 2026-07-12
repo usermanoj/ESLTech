@@ -37,6 +37,20 @@ const INTENT_GUIDE: Record<Intent, string> = {
   translate: "Translate faithfully; keep physics terms accurate.",
 };
 
+// "askme" needs a different instruction once the student has actually replied
+// to a previous guiding question — otherwise the model just fires MORE
+// unrelated questions instead of reacting to what the student said.
+function intentGuide(intent: Intent, turn: number): string {
+  if (intent === "askme" && turn > 0) {
+    return (
+      "The student has just responded to your previous guiding question(s) — check the conversation history for what they said. " +
+      "Briefly react to it (confirm if they're on the right track, or gently correct a misconception using the approved material), " +
+      "THEN ask 1–2 NEW guiding questions that go further. Do not just repeat earlier questions."
+    );
+  }
+  return INTENT_GUIDE[intent];
+}
+
 export function buildSystemPrompt(topicId: string, level: EslLevel, intent: Intent, turn = 0): string {
   const chunks = corpusForTopic(topicId);
   const progressNote =
@@ -54,7 +68,7 @@ ABSOLUTE RULES — follow every time:
 4. NEVER complete a whole assignment or give the final numeric answer to a task the student must do. Guide, hint, and ask questions instead (academic integrity).
 5. Be encouraging and concise. ${LEVEL_GUIDE[level]}${progressNote}
 
-TASK MODE: ${INTENT_GUIDE[intent]}
+TASK MODE: ${intentGuide(intent, turn)}
 
 APPROVED MATERIAL:
 ${corpusBlock(chunks)}`;
@@ -106,8 +120,28 @@ function byId(id: string): CorpusChunk {
 }
 const citeOf = (c: CorpusChunk) => `📖 Based on: ${c.source} (demo mode)`;
 
+// Hints for "Check My Answer", one per numeric worked-example chunk — used
+// only when we know WHICH problem the student is working on (contextChunkId).
+// Without that, there is nothing real to check, so we say so honestly instead
+// of guessing (see the "check" case below).
+const CHECK_HINTS: Record<string, string> = {
+  "m-seesaw":
+    "did you set clockwise moment = anticlockwise moment (F₁×d₁ = F₂×d₂)? Have you correctly identified which weight or distance you're solving for?",
+  "m-rearrange":
+    "did you rearrange Moment = Force × distance into Force = Moment ÷ distance? Did you convert the distance from cm to metres first?",
+  "m-ws7-lever":
+    "did you use Moment = Force × distance, and did you convert the distance to metres first? Did you state the unit (Nm) and the direction (clockwise / anticlockwise)?",
+  "m-ws7-rock":
+    "did you calculate the moment for the person AND the rock separately (Moment = Force × distance for each) before comparing them?",
+};
+
 // Deterministic fallback so the UI is fully demoable before an API key is set.
-export function fallbackReply(intent: Intent, question: string, turn = 0): FallbackResult {
+export function fallbackReply(
+  intent: Intent,
+  question: string,
+  turn = 0,
+  contextChunkId?: string,
+): FallbackResult {
   switch (intent) {
     case "explain": {
       const id = EXPLAIN_IDS[turn % EXPLAIN_IDS.length];
@@ -124,18 +158,37 @@ export function fallbackReply(intent: Intent, question: string, turn = 0): Fallb
       };
     }
     case "askme": {
-      const set = ASKME_SETS[turn % ASKME_SETS.length];
+      const setIdx = turn % ASKME_SETS.length;
+      const set = ASKME_SETS[setIdx];
       const c = byId(set.chunkId);
       const qs = set.qs.map((q, i) => `${i + 1}. ${q}`).join("\n");
-      return { text: `Let's think it through together:\n${qs}\n\n${citeOf(c)}`, sourceId: set.chunkId };
+      if (turn === 0) {
+        return { text: `Let's think it through together:\n${qs}\n\n${citeOf(c)}`, sourceId: set.chunkId };
+      }
+      // The student has replied to the previous question(s) — acknowledge and
+      // reveal the key idea behind THAT question before asking new ones, so
+      // this feels like a real back-and-forth instead of a random restart.
+      const prevSet = ASKME_SETS[(turn - 1) % ASKME_SETS.length];
+      const prevChunk = byId(prevSet.chunkId);
+      return {
+        text: `Nice thinking! Here's the key idea to check your answer against: ${prevChunk.text}\n\nNow let's go further:\n${qs}\n\n${citeOf(c)}`,
+        sourceId: set.chunkId,
+      };
     }
     case "check": {
-      const c = byId("m-ws7-lever");
+      if (contextChunkId && CHECK_HINTS[contextChunkId]) {
+        const c = byId(contextChunkId);
+        return {
+          text: `Let's check your working — ${CHECK_HINTS[contextChunkId]} Fix that, then show me again.\n\n${citeOf(c)}`,
+          sourceId: contextChunkId,
+        };
+      }
+      // No established problem in this conversation — don't guess or point at
+      // an unrelated worksheet. Ask the student to establish context first.
       return {
         text:
-          "Before I check anything: did you use Moment = force × distance, and did you convert the distance to metres first? " +
-          `Did you state the unit (Nm) and the direction (clockwise / anticlockwise)? Fix those and show me your working.\n\n${citeOf(c)}`,
-        sourceId: c.id,
+          "I don't have a specific question in view yet, so I can't check your working against the right numbers. " +
+          'Tap "Explain" or "Give Example" first (or type the question above), then tap Check My Answer again.',
       };
     }
     case "translate": {

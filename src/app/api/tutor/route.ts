@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { claude, hasApiKey, MODEL } from "@/lib/claude";
 import { buildSystemPrompt, fallbackReply, type Intent, type EslLevel } from "@/lib/tutor";
+import { CORPUS } from "@/data/corpus";
 
 export const runtime = "nodejs";
 
@@ -8,26 +9,36 @@ type HistoryTurn = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: NextRequest) {
   try {
-    const { intent, question, level, answer, turn, history } = (await req.json()) as {
+    const { intent, question, level, answer, turn, history, contextChunkId } = (await req.json()) as {
       intent: Intent;
       question: string;
       level: EslLevel;
       answer?: string;
       turn?: number;
       history?: HistoryTurn[];
+      contextChunkId?: string;
     };
     const turnNum = turn ?? 0;
 
     if (!hasApiKey()) {
-      const fb = fallbackReply(intent, question, turnNum);
+      const fb = fallbackReply(intent, question, turnNum, contextChunkId);
       return NextResponse.json({ reply: fb.text, demo: true, sourceId: fb.sourceId });
     }
 
     const system = buildSystemPrompt("moments", level ?? "intermediate", intent ?? "explain", turnNum);
-    const userText =
-      intent === "check" && answer
-        ? `Here is my attempt at: "${question}"\n\nMy answer/working: ${answer}\n\nGive me a hint about what to check — do not give the final answer.`
-        : question || "Please help me understand this topic.";
+
+    let userText: string;
+    if (intent === "check") {
+      const contextChunk = contextChunkId ? CORPUS.find((c) => c.id === contextChunkId) : undefined;
+      userText = contextChunk
+        ? `The student is working on a problem related to: "${contextChunk.text}" (source: ${contextChunk.source}). ` +
+          `Their attempted answer/working: "${answer}". Give a hint about what to check — do not give the final answer.`
+        : `The student tapped "Check My Answer" but no specific question has been established in this conversation yet. ` +
+          `Their input: "${answer || question}". Do NOT invent or guess a problem — ask them to state or paste the exact ` +
+          `question they are solving, then you can check their working once you know it.`;
+    } else {
+      userText = question || "Please help me understand this topic.";
+    }
 
     // Thread real conversation history so the model actually remembers what it
     // already said — without this, "then?" / "what next?" has nothing to build on.

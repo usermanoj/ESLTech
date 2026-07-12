@@ -11,7 +11,8 @@ type Msg = {
   raw?: string;       // the actual content sent to / returned from the model, for history
   cite?: string;
   demo?: boolean;
-  chunkId?: string;   // which approved-corpus chunk this AI reply was grounded in (demo mode)
+  chunkId?: string;      // which approved-corpus chunk this AI reply was grounded in (demo mode)
+  isTranslation?: boolean; // true for a Translate result — never re-translate a translation
 };
 
 const BUTTONS: { intent: Intent; label: string; icon: string; hint: string }[] = [
@@ -114,6 +115,10 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
   const [showCheck, setShowCheck] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const turnCounts = useRef<Partial<Record<Intent, number>>>({});
+  // Which conversational mode the free-text box continues when you hit Enter —
+  // without this it always defaulted to "explain", so replying to a Socratic
+  // question got mislabelled and answered as an unrelated new explanation.
+  const [lastIntent, setLastIntent] = useState<Intent>("explain");
 
   async function ask(intent: Intent) {
     if (intent === "check" && !showCheck) {
@@ -141,7 +146,10 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
 
     try {
       if (intent === "translate") {
-        const lastAi = [...messages].reverse().find((m) => m.role === "ai");
+        // Skip past any previous translation output — translating a
+        // translation isn't meaningful, and it has no corpus sourceId, which
+        // used to make repeated Translate presses degrade into "no match".
+        const lastAi = [...messages].reverse().find((m) => m.role === "ai" && !m.isTranslation);
         const sourceText = lastAi?.text || DEFAULT_TRANSLATE_SOURCE;
         const sourceId = lastAi?.chunkId;
         const res = await fetch("/api/translate", {
@@ -151,12 +159,20 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
         });
         const data = await res.json();
         const { body, cite } = splitCite(data.translation || "");
-        setMessages((m) => [...m, { role: "ai", text: body, raw: body, cite, demo: data.demo }]);
+        setMessages((m) => [
+          ...m,
+          { role: "ai", text: body, raw: body, cite, demo: data.demo, isTranslation: true, chunkId: sourceId },
+        ]);
         return;
       }
 
       const turn = turnCounts.current[intent] ?? 0;
       turnCounts.current[intent] = turn + 1;
+
+      // Which approved-corpus problem the conversation is currently about —
+      // needed so "Check My Answer" can hint at the RIGHT problem instead of
+      // an unrelated hardcoded one.
+      const contextChunkId = [...messages].reverse().find((m) => m.role === "ai" && m.chunkId)?.chunkId;
 
       // Real conversation memory: without this, the model can't tell what it
       // already said, so "then?" / "what next?" has nothing to build on.
@@ -170,11 +186,15 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
       const res = await fetch("/api/tutor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intent, question: q, level, answer: ans, turn, history }),
+        body: JSON.stringify({ intent, question: q, level, answer: ans, turn, history, contextChunkId }),
       });
       const data = await res.json();
       const { body, cite } = splitCite(data.reply || "");
-      setMessages((m) => [...m, { role: "ai", text: body, raw: body, cite, demo: data.demo, chunkId: data.sourceId }]);
+      setMessages((m) => [
+        ...m,
+        { role: "ai", text: body, raw: body, cite, demo: data.demo, chunkId: data.sourceId ?? contextChunkId },
+      ]);
+      if (intent === "explain" || intent === "example" || intent === "askme") setLastIntent(intent);
     } catch {
       setMessages((m) => [...m, { role: "ai", text: "⚠️ Network problem — please try again." }]);
     } finally {
@@ -269,9 +289,13 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
         <input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="Ask about moments… (or just tap a button)"
+          placeholder={
+            lastIntent === "askme"
+              ? "Type your answer to continue…"
+              : "Ask about moments… (or just tap a button)"
+          }
           className="mb-2 w-full rounded-xl bg-black/20 px-3 py-2 text-sm outline-none ring-1 ring-[var(--border)] focus:ring-[var(--brand)]"
-          onKeyDown={(e) => e.key === "Enter" && ask("explain")}
+          onKeyDown={(e) => e.key === "Enter" && ask(lastIntent)}
         />
         <div className="grid grid-cols-5 gap-2">
           {BUTTONS.map((b) => (
