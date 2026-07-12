@@ -103,7 +103,7 @@ function speak(text: string) {
 }
 // ---------------------------------------------------------------------------
 
-export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
+export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string; topicTitle: string }) {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "ai",
@@ -210,7 +210,7 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
       const res = await fetch("/api/tutor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intent, question: q, level, answer: ans, turn, history, contextChunkId }),
+        body: JSON.stringify({ topicId, intent, question: q, level, answer: ans, turn, history, contextChunkId }),
       });
       const data = await res.json();
       const { body, cite } = splitCite(data.reply || "");

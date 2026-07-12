@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 const SUBJECTS = [
-  { id: "physics", name: "Physics", icon: "🧲", color: "#22d3ee", topics: 1, ready: true, blurb: "Moments of a Force (5 more topics planned)" },
+  { id: "physics", name: "Physics", icon: "🧲", color: "#22d3ee", topics: 2, ready: true, blurb: "Moments of a Force · Distance–Time Graphs" },
   { id: "math", name: "Mathematics", icon: "📐", color: "#6366f1", topics: 0, ready: false, blurb: "Algebra · Geometry · Data" },
   { id: "science", name: "Science", icon: "🔬", color: "#34d399", topics: 0, ready: false, blurb: "Biology · Chemistry · Energy" },
   { id: "english", name: "English", icon: "📖", color: "#f472b6", topics: 0, ready: false, blurb: "Reading · Grammar · Essays" },
@@ -11,7 +11,7 @@ const SUBJECTS = [
 // shows "Coming soon" rather than linking to the wrong content.
 const TASKS: { subject: string; title: string; due: string; status: string; href?: string }[] = [
   { subject: "Physics", title: "Moments of a Force", due: "This week", status: "In progress", href: "/topics/moments" },
-  { subject: "Physics", title: "Distance–Time Graphs", due: "Next week", status: "Coming soon" },
+  { subject: "Physics", title: "Distance–Time Graphs", due: "Next week", status: "Not started", href: "/topics/distance-time" },
 ];
 
 export default function Subjects() {

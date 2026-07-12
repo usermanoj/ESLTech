@@ -3,18 +3,24 @@
 import Link from "next/link";
 import { useState } from "react";
 import { motion } from "framer-motion";
-import MomentsLever, { type LeverState } from "@/components/physics/MomentsLever";
+import DistanceTimeGraph, { type JourneyState } from "@/components/physics/DistanceTimeGraph";
 import AiTutorPanel from "@/components/tutor/AiTutorPanel";
 import ReadingText from "@/components/reading/ReadingText";
 import PracticeZone from "@/components/practice/PracticeZone";
 import { CORPUS, TOPICS } from "@/data/corpus";
-import { MOMENTS_BANK } from "@/data/practice-banks";
+import { DISTANCE_TIME_BANK } from "@/data/practice-banks";
 
-const TOPIC = TOPICS["moments"];
-const learnChunks = CORPUS.filter((c) => ["m-def", "m-principle"].includes(c.id));
+const TOPIC = TOPICS["distance-time"];
+const learnChunks = CORPUS.filter((c) => ["dt-def", "dt-axes", "dt-stationary"].includes(c.id));
 
-export default function MomentsTopic() {
-  const [lever, setLever] = useState<LeverState | null>(null);
+const PHASE_LABEL: Record<JourneyState["phase"], string> = {
+  "walking-out": "walking (first leg) ↗",
+  resting: "resting (stationary) ⏸",
+  "walking-on": "walking (second leg) ↗",
+};
+
+export default function DistanceTimeTopic() {
+  const [journey, setJourney] = useState<JourneyState | null>(null);
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -53,23 +59,24 @@ export default function MomentsTopic() {
             </div>
           </section>
 
-          <MomentsLever onChange={setLever} />
+          <DistanceTimeGraph onChange={setJourney} />
 
           <div className="glass rounded-2xl px-4 py-2.5 text-sm text-[var(--muted)]">
-            Live from the seesaw: anticlockwise{" "}
-            <span className="font-semibold text-[var(--brand2)]">{lever?.anticlockwise ?? "—"} Nm</span> vs clockwise{" "}
-            <span className="font-semibold text-[var(--accent)]">{lever?.clockwise ?? "—"} Nm</span> —{" "}
-            <span className="font-semibold" style={{ color: lever?.balanced ? "var(--good)" : "var(--warn)" }}>
-              {lever ? (lever.balanced ? "balanced ⚖️" : "not balanced") : "loading…"}
-            </span>
+            Live from the journey: at{" "}
+            <span className="font-semibold text-[var(--brand2)]">{journey?.time ?? "—"} s</span> the object is at{" "}
+            <span className="font-semibold text-[var(--brand2)]">{journey?.distance ?? "—"} m</span>,{" "}
+            <span className="font-semibold" style={{ color: journey?.phase === "resting" ? "var(--warn)" : "var(--accent)" }}>
+              {journey ? PHASE_LABEL[journey.phase] : "loading…"}
+            </span>{" "}
+            at <span className="font-semibold text-[var(--accent)]">{journey?.speed ?? "—"} m/s</span>.
           </div>
 
-          <PracticeZone bank={MOMENTS_BANK} />
+          <PracticeZone bank={DISTANCE_TIME_BANK} />
         </div>
 
         {/* RIGHT: sticky tutor */}
         <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)]">
-          <AiTutorPanel topicId="moments" topicTitle={TOPIC.title} />
+          <AiTutorPanel topicId="distance-time" topicTitle={TOPIC.title} />
         </div>
       </div>
     </main>

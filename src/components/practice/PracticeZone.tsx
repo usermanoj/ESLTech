@@ -1,50 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { grade, type Question } from "@/lib/grade";
+import { grade } from "@/lib/grade";
+import type { PracticeItem } from "@/data/practice-banks";
 
-type Item = {
-  id: string;
-  level: "Easy" | "Medium" | "Challenge";
-  prompt: string;
-  question: Question;
-  source: string;
-};
-
-// All answers verified against the school's own worksheet answer keys.
-const BANK: Item[] = [
-  {
-    id: "e1",
-    level: "Easy",
-    prompt: "A force of 70 N turns a lever 0.4 m from the pivot P. Calculate the moment. State value, unit and direction (clockwise).",
-    question: { kind: "numeric", expected: 28, unit: "Nm", direction: "clockwise" },
-    source: "Worksheet 7, Q4 (answer key)",
-  },
-  {
-    id: "m1",
-    level: "Medium",
-    prompt: "Ram (200 N) sits 1.5 m from a seesaw pivot. What weight must Shyam be at 1.0 m to balance it? (Give value + unit.)",
-    question: { kind: "numeric", expected: 300, unit: "N" },
-    source: "Moments of Force — Slides 5–6",
-  },
-  {
-    id: "c1",
-    level: "Challenge",
-    prompt: "The moment of a force is 42 Nm and it acts 7 cm from the pivot. Calculate the force. (Convert cm → m first! Value + unit.)",
-    question: { kind: "numeric", expected: 600, unit: "N", tolerance: 2 },
-    source: "Moments of Force — Slides 14–15",
-  },
-];
-
-export default function PracticeZone() {
+export default function PracticeZone({ bank }: { bank: PracticeItem[] }) {
   const [idx, setIdx] = useState(0);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<ReturnType<typeof grade> | null>(null);
   const [streak, setStreak] = useState(0);
   const [wrong, setWrong] = useState(0);
 
-  const item = BANK[idx];
+  // Reset to the first question whenever the bank itself changes (e.g. the
+  // student navigates to a different topic that renders this same component).
+  useEffect(() => {
+    setIdx(0);
+    setInput("");
+    setResult(null);
+    setStreak(0);
+    setWrong(0);
+  }, [bank]);
+
+  const item = bank[idx];
 
   function check() {
     const r = grade(item.question, input);
@@ -57,13 +35,13 @@ export default function PracticeZone() {
     }
   }
 
-  function next(targetLevel?: Item["level"]) {
+  function next(targetLevel?: PracticeItem["level"]) {
     let n = idx;
     if (targetLevel) {
-      const found = BANK.findIndex((b) => b.level === targetLevel);
+      const found = bank.findIndex((b) => b.level === targetLevel);
       if (found >= 0) n = found;
     } else {
-      n = (idx + 1) % BANK.length;
+      n = (idx + 1) % bank.length;
     }
     setIdx(n);
     setInput("");
@@ -99,7 +77,7 @@ export default function PracticeZone() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && input && check()}
-          placeholder="e.g. 28 Nm clockwise"
+          placeholder={placeholderFor(item.question)}
           className="flex-1 rounded-xl bg-black/20 px-3 py-2 text-sm outline-none ring-1 ring-[var(--border)] focus:ring-[var(--brand)]"
         />
         <button
@@ -153,6 +131,16 @@ export default function PracticeZone() {
       </AnimatePresence>
     </section>
   );
+}
+
+// Shows the expected ANSWER FORMAT (value + unit + direction) using an
+// obviously-fake dummy number — never the real expected value, so the
+// placeholder can't accidentally give away the answer.
+function placeholderFor(q: PracticeItem["question"]): string {
+  if (q.kind !== "numeric") return "Type your answer…";
+  const parts = ["e.g. 12", q.unit ?? ""];
+  if (q.direction) parts.push(q.direction);
+  return parts.filter(Boolean).join(" ");
 }
 
 function Chip({ ok, label }: { ok?: boolean; label: string }) {

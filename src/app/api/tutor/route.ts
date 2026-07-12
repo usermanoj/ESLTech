@@ -9,7 +9,8 @@ type HistoryTurn = { role: "user" | "assistant"; content: string };
 
 export async function POST(req: NextRequest) {
   try {
-    const { intent, question, level, answer, turn, history, contextChunkId } = (await req.json()) as {
+    const { topicId, intent, question, level, answer, turn, history, contextChunkId } = (await req.json()) as {
+      topicId?: string;
       intent: Intent;
       question: string;
       level: EslLevel;
@@ -19,13 +20,14 @@ export async function POST(req: NextRequest) {
       contextChunkId?: string;
     };
     const turnNum = turn ?? 0;
+    const topic = topicId ?? "moments";
 
     if (!hasApiKey()) {
-      const fb = fallbackReply(intent, question, turnNum, contextChunkId);
+      const fb = fallbackReply(topic, intent, question, turnNum, contextChunkId);
       return NextResponse.json({ reply: fb.text, demo: true, sourceId: fb.sourceId });
     }
 
-    const system = buildSystemPrompt("moments", level ?? "intermediate", intent ?? "explain", turnNum);
+    const system = buildSystemPrompt(topic, level ?? "intermediate", intent ?? "explain", turnNum);
 
     let userText: string;
     if (intent === "check") {
