@@ -4,7 +4,7 @@
 
 ### One truth: your teacher's material, in every student's language.
 
-**A closed-corpus AI learning platform for ESL students at IB & Cambridge international schools.**
+**A closed-corpus AI learning platform for students learning in English as a Second Language (ESL) at IB & Cambridge international schools.**
 Every answer comes only from a teacher's own approved material — never the open internet — cited every time, and translated into a student's own language.
 
 [![Live Demo](https://img.shields.io/badge/demo-live-34D399?style=for-the-badge)](https://esltech.vercel.app)

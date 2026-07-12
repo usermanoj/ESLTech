@@ -1,9 +1,9 @@
-# 2-minute demo script — Verity AI (Curriculum AI for ESL Classrooms)
+# 2-minute demo script — Verity AI (Curriculum AI for English as a Second Language classrooms)
 
-**One-liner:** *"An AI tutor for ESL students that can only answer from the teacher's own approved materials — cited every time — and is built to guide, not to hand over answers."*
+**One-liner:** *"An AI tutor for students learning in English as a Second Language (ESL) that can only answer from the teacher's own approved materials — cited every time — and is built to guide, not to hand over answers."*
 
 ## The problem (10s)
-ESL students at international schools face a double barrier: hard science **and** a second language. Generic AI (ChatGPT) will happily do their homework, in unpredictable English, from the whole internet — teachers can't trust it.
+ESL (English as a Second Language) students at international schools face a double barrier: hard science **and** a second language. Generic AI (ChatGPT) will happily do their homework, in unpredictable English, from the whole internet — teachers can't trust it.
 
 ## The walkthrough (90s)
 
