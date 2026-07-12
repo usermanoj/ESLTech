@@ -4,30 +4,40 @@ import { buildSystemPrompt, fallbackReply, type Intent, type EslLevel } from "@/
 
 export const runtime = "nodejs";
 
+type HistoryTurn = { role: "user" | "assistant"; content: string };
+
 export async function POST(req: NextRequest) {
   try {
-    const { intent, question, level, answer } = (await req.json()) as {
+    const { intent, question, level, answer, turn, history } = (await req.json()) as {
       intent: Intent;
       question: string;
       level: EslLevel;
       answer?: string;
+      turn?: number;
+      history?: HistoryTurn[];
     };
+    const turnNum = turn ?? 0;
 
     if (!hasApiKey()) {
-      return NextResponse.json({ reply: fallbackReply(intent, question), demo: true });
+      const fb = fallbackReply(intent, question, turnNum);
+      return NextResponse.json({ reply: fb.text, demo: true, sourceId: fb.sourceId });
     }
 
-    const system = buildSystemPrompt("moments", level ?? "intermediate", intent ?? "explain");
+    const system = buildSystemPrompt("moments", level ?? "intermediate", intent ?? "explain", turnNum);
     const userText =
       intent === "check" && answer
         ? `Here is my attempt at: "${question}"\n\nMy answer/working: ${answer}\n\nGive me a hint about what to check — do not give the final answer.`
         : question || "Please help me understand this topic.";
 
+    // Thread real conversation history so the model actually remembers what it
+    // already said — without this, "then?" / "what next?" has nothing to build on.
+    const priorTurns = (history ?? []).map((h) => ({ role: h.role, content: h.content }));
+
     const msg = await claude().messages.create({
       model: MODEL,
       max_tokens: 800,
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: userText }],
+      messages: [...priorTurns, { role: "user", content: userText }],
     });
 
     const reply = msg.content

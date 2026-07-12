@@ -37,8 +37,12 @@ const INTENT_GUIDE: Record<Intent, string> = {
   translate: "Translate faithfully; keep physics terms accurate.",
 };
 
-export function buildSystemPrompt(topicId: string, level: EslLevel, intent: Intent): string {
+export function buildSystemPrompt(topicId: string, level: EslLevel, intent: Intent, turn = 0): string {
   const chunks = corpusForTopic(topicId);
+  const progressNote =
+    turn > 0
+      ? `\n6. The student has used "${intent}" ${turn + 1} times in this conversation — look at the conversation history and do NOT repeat a previous reply. Go deeper, use a different worked example, or ask different guiding questions than before.`
+      : "";
   return `You are the ESL Learning Hub tutor for ${TOPIC.grade} ${TOPIC.subject}, topic "${TOPIC.title}".
 You are a patient guide for English-as-a-Second-Language students at an international school (IG & IB curriculum).
 
@@ -48,7 +52,7 @@ ABSOLUTE RULES — follow every time:
 3. ALWAYS end your reply with a citation line naming the source(s) you used, formatted exactly as:
    "📖 Based on: <cite value>"
 4. NEVER complete a whole assignment or give the final numeric answer to a task the student must do. Guide, hint, and ask questions instead (academic integrity).
-5. Be encouraging and concise. ${LEVEL_GUIDE[level]}
+5. Be encouraging and concise. ${LEVEL_GUIDE[level]}${progressNote}
 
 TASK MODE: ${INTENT_GUIDE[intent]}
 
@@ -56,22 +60,95 @@ APPROVED MATERIAL:
 ${corpusBlock(chunks)}`;
 }
 
+export type FallbackResult = { text: string; sourceId?: string };
+
+// Rotation order for demo/offline mode — every repeated tap of a button
+// surfaces genuinely different, corpus-grounded content instead of a static
+// canned reply. (Live mode gets real variety from conversation memory instead;
+// see route.ts, which now threads full history to Claude.)
+const EXPLAIN_IDS = ["m-def", "m-principle", "m-net", "m-ws7-lever"];
+const EXAMPLE_IDS = ["m-seesaw", "m-rearrange", "m-ws7-rock"];
+const ASKME_SETS: { chunkId: string; qs: string[] }[] = [
+  {
+    chunkId: "m-def",
+    qs: [
+      "What two things does the size of a moment depend on?",
+      "What is the unit of a moment, and why is it that unit?",
+    ],
+  },
+  {
+    chunkId: "m-principle",
+    qs: [
+      "When a seesaw is balanced, what must be true about the clockwise and anticlockwise moments?",
+      "What do we call the fixed point a beam turns around?",
+    ],
+  },
+  {
+    chunkId: "m-net",
+    qs: [
+      "If the clockwise moments add up to more than the anticlockwise moments, which way will the beam turn?",
+      "How do you work out the net moment when several forces act on a beam?",
+    ],
+  },
+  {
+    chunkId: "m-ws7-lever",
+    qs: [
+      "Besides the number, what two other things must you always state in a moments answer?",
+      "Why must you convert distances to metres before calculating a moment?",
+    ],
+  },
+];
+
+function byId(id: string): CorpusChunk {
+  const c = CORPUS.find((x) => x.id === id);
+  if (!c) throw new Error(`Unknown corpus chunk: ${id}`);
+  return c;
+}
+const citeOf = (c: CorpusChunk) => `📖 Based on: ${c.source} (demo mode)`;
+
 // Deterministic fallback so the UI is fully demoable before an API key is set.
-export function fallbackReply(intent: Intent, question: string): string {
-  const cite = "📖 Based on: Moments of Force — Slides 2–3 (demo mode)";
-  const q = question.trim() || "moments";
+export function fallbackReply(intent: Intent, question: string, turn = 0): FallbackResult {
   switch (intent) {
-    case "explain":
-      return `A moment is the turning effect of a force. It depends on how big the force is and how far it acts from the pivot (the point it turns around). We calculate it with:  Moment = force × perpendicular distance.  Force is in newtons (N), distance in metres (m), so a moment is in newton metres (Nm).\n\n${cite}`;
-    case "example":
-      return `Worked example from your slides: Ram weighs 200 N and sits 1.5 m from the pivot of a seesaw. For balance, clockwise moment = anticlockwise moment, so F₁d₁ = F₂d₂. That gives 200 × 1.5 = F₂ × 1.0, so F₂ = 300 N.  Now try: if Ram moved to 2.0 m, what weight would balance him at 1.0 m?\n\n${cite}`;
-    case "askme":
-      return `Let's think it through together:\n1. What two things does the size of a moment depend on?\n2. What is the unit of a moment, and why?\n3. When a seesaw is balanced, what is true about the clockwise and anticlockwise moments?\n\n${cite}`;
-    case "check":
-      return `Before I check anything: did you use Moment = force × distance, and did you convert the distance to metres first? Did you state the unit (Nm) and the direction (clockwise / anticlockwise)? Fix those and show me your working.\n\n${cite}`;
-    case "translate":
-      return `力矩是力的转动效果。力矩 = 力 × 到支点的垂直距离。（单位：牛顿·米 Nm）\n\n${cite}`;
+    case "explain": {
+      const id = EXPLAIN_IDS[turn % EXPLAIN_IDS.length];
+      const c = byId(id);
+      const lead = turn === 0 ? "" : "Let's go a bit deeper — ";
+      return { text: `${lead}${c.text}\n\n${citeOf(c)}`, sourceId: id };
+    }
+    case "example": {
+      const id = EXAMPLE_IDS[turn % EXAMPLE_IDS.length];
+      const c = byId(id);
+      return {
+        text: `Worked example: ${c.text}\n\nNow try a similar one yourself!\n\n${citeOf(c)}`,
+        sourceId: id,
+      };
+    }
+    case "askme": {
+      const set = ASKME_SETS[turn % ASKME_SETS.length];
+      const c = byId(set.chunkId);
+      const qs = set.qs.map((q, i) => `${i + 1}. ${q}`).join("\n");
+      return { text: `Let's think it through together:\n${qs}\n\n${citeOf(c)}`, sourceId: set.chunkId };
+    }
+    case "check": {
+      const c = byId("m-ws7-lever");
+      return {
+        text:
+          "Before I check anything: did you use Moment = force × distance, and did you convert the distance to metres first? " +
+          `Did you state the unit (Nm) and the direction (clockwise / anticlockwise)? Fix those and show me your working.\n\n${citeOf(c)}`,
+        sourceId: c.id,
+      };
+    }
+    case "translate": {
+      // The Translate button now calls /api/translate directly (see AiTutorPanel),
+      // which has reviewed per-chunk translations. This case is a rarely-hit
+      // fallback if /api/tutor is ever called with intent=translate directly.
+      const c = byId("m-def");
+      return {
+        text: `力矩是力的转动效果。力矩 = 力 × 到支点的垂直距离，单位是牛顿·米（Nm）。\n\n${citeOf(c)}`,
+        sourceId: c.id,
+      };
+    }
     default:
-      return `I can help with "${q}" using your class material. Try the Explain or Example button.\n\n${cite}`;
+      return { text: `I can help with "${question || "moments"}" using your class material. Try the Explain or Example button.` };
   }
 }

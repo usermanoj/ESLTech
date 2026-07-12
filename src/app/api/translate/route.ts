@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { claude, hasApiKey, MODEL } from "@/lib/claude";
-import { GLOSSARY } from "@/data/corpus";
+import { GLOSSARY, CORPUS } from "@/data/corpus";
+import { ZH_TRANSLATIONS } from "@/data/translations-zh";
 
 export const runtime = "nodejs";
 
@@ -10,14 +11,28 @@ const glossaryLines = Object.entries(GLOSSARY)
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, target } = (await req.json()) as { text: string; target?: string };
+    const { text, target, sourceId } = (await req.json()) as {
+      text: string;
+      target?: string;
+      sourceId?: string;
+    };
     const lang = target || "Simplified Chinese (简体中文)";
 
     if (!hasApiKey()) {
-      // Minimal offline fallback for the demo sentence.
+      // Demo/offline mode: use a reviewed translation of the ACTUAL chunk that
+      // was just explained (sourceId), rather than one generic canned string —
+      // so Translate reflects what the student is really looking at.
+      const reviewed = sourceId ? ZH_TRANSLATIONS[sourceId] : undefined;
+      const chunk = sourceId ? CORPUS.find((c) => c.id === sourceId) : undefined;
+      if (reviewed) {
+        return NextResponse.json({
+          translation: `${reviewed}\n\n📖 Based on: ${chunk?.source ?? "approved material"} (demo mode — reviewed translation)`,
+          demo: true,
+        });
+      }
       return NextResponse.json({
         translation:
-          "力矩是力的转动效果。力矩 = 力 × 到支点的垂直距离，单位是牛顿·米（Nm）。（演示模式翻译）",
+          "演示模式：暂无该内容的预先翻译。\n(Demo mode: no pre-reviewed translation for this exact text yet — enable the live AI for a full, accurate translation of anything.)",
         demo: true,
       });
     }

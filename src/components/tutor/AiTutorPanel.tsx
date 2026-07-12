@@ -5,14 +5,21 @@ import { AnimatePresence, motion } from "framer-motion";
 
 type Intent = "explain" | "translate" | "example" | "askme" | "check";
 type EslLevel = "advanced" | "intermediate" | "beginner" | "beginner_zh";
-type Msg = { role: "user" | "ai"; text: string; cite?: string; demo?: boolean };
+type Msg = {
+  role: "user" | "ai";
+  text: string;      // display text (may be prefixed with a button label for user turns)
+  raw?: string;       // the actual content sent to / returned from the model, for history
+  cite?: string;
+  demo?: boolean;
+  chunkId?: string;   // which approved-corpus chunk this AI reply was grounded in (demo mode)
+};
 
 const BUTTONS: { intent: Intent; label: string; icon: string; hint: string }[] = [
   { intent: "explain", label: "Explain", icon: "💡", hint: "Explain this simply" },
   { intent: "example", label: "Give Example", icon: "🧮", hint: "Show a worked example" },
   { intent: "askme", label: "Ask Me Questions", icon: "❓", hint: "Quiz me (Socratic)" },
   { intent: "check", label: "Check My Answer", icon: "✅", hint: "Hint on my attempt" },
-  { intent: "translate", label: "Translate", icon: "🌏", hint: "Into Chinese" },
+  { intent: "translate", label: "Translate", icon: "🌏", hint: "Translate the last reply" },
 ];
 
 const LEVELS: { id: EslLevel; label: string }[] = [
@@ -22,19 +29,75 @@ const LEVELS: { id: EslLevel; label: string }[] = [
   { id: "beginner_zh", label: "English + 中文" },
 ];
 
+const DEFAULT_TRANSLATE_SOURCE =
+  "A moment is the turning effect of a force. Moment = force × perpendicular distance from the pivot.";
+
 function splitCite(text: string): { body: string; cite?: string } {
   const idx = text.indexOf("📖 Based on:");
   if (idx === -1) return { body: text };
   return { body: text.slice(0, idx).trim(), cite: text.slice(idx).trim() };
 }
 
+// --- Language-aware read-aloud -------------------------------------------
+// Splits mixed English/Chinese text into runs so each run is spoken with the
+// correct voice+lang (a single English-tagged utterance mispronounces or
+// silently skips Chinese characters). Also works around a long-standing
+// Chrome bug where utterances longer than ~15s silently stop.
+const CJK_RANGE = /[㐀-鿿＀-￯]/;
+
+function splitByLanguage(text: string): { text: string; lang: "zh-CN" | "en-US" }[] {
+  const parts = text.match(/[㐀-鿿＀-￯]+|[^㐀-鿿＀-￯]+/g) || [text];
+  return parts
+    .map((p) => ({ text: p, lang: (CJK_RANGE.test(p[0] ?? "") ? "zh-CN" : "en-US") as "zh-CN" | "en-US" }))
+    .filter((p) => p.text.trim().length > 0);
+}
+
+let voicesCache: SpeechSynthesisVoice[] = [];
+if (typeof window !== "undefined" && window.speechSynthesis) {
+  const loadVoices = () => {
+    voicesCache = window.speechSynthesis.getVoices();
+  };
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+function pickVoice(lang: string): SpeechSynthesisVoice | undefined {
+  return (
+    voicesCache.find((v) => v.lang === lang) ||
+    voicesCache.find((v) => v.lang.toLowerCase().startsWith(lang.split("-")[0].toLowerCase()))
+  );
+}
+
 function speak(text: string) {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 0.92;
-  window.speechSynthesis.speak(u);
+  const synth = window.speechSynthesis;
+  synth.cancel();
+  const segments = splitByLanguage(text);
+  let i = 0;
+  const speakNext = () => {
+    if (i >= segments.length) return;
+    const seg = segments[i++];
+    const u = new SpeechSynthesisUtterance(seg.text);
+    u.lang = seg.lang;
+    const voice = pickVoice(seg.lang);
+    if (voice) u.voice = voice;
+    u.rate = seg.lang === "zh-CN" ? 0.85 : 0.92;
+    u.onend = speakNext;
+    u.onerror = speakNext;
+    synth.speak(u);
+  };
+  speakNext();
+  // Chrome workaround: long speech silently halts unless kept alive.
+  const keepAlive = setInterval(() => {
+    if (!synth.speaking) {
+      clearInterval(keepAlive);
+      return;
+    }
+    synth.pause();
+    synth.resume();
+  }, 5000);
 }
+// ---------------------------------------------------------------------------
 
 export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
   const [messages, setMessages] = useState<Msg[]>([
@@ -50,27 +113,68 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
   const [loading, setLoading] = useState<Intent | null>(null);
   const [showCheck, setShowCheck] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const turnCounts = useRef<Partial<Record<Intent, number>>>({});
 
   async function ask(intent: Intent) {
     if (intent === "check" && !showCheck) {
       setShowCheck(true);
       return;
     }
+
     const q = question.trim() || `Help me with ${topicTitle}`;
+    const ans = answer;
+    // Clear inputs immediately so leftover text never lingers into the next turn.
+    setQuestion("");
+    setAnswer("");
+
+    const label = BUTTONS.find((b) => b.intent === intent)?.label ?? intent;
+    const userRaw = intent === "check" ? ans : q;
     setMessages((m) => [
       ...m,
-      { role: "user", text: intent === "check" ? `Check my answer: ${answer || "(my working)"}` : `${BUTTONS.find(b => b.intent===intent)?.label}: ${q}` },
+      {
+        role: "user",
+        text: intent === "check" ? `Check my answer: ${ans || "(my working)"}` : `${label}: ${q}`,
+        raw: userRaw,
+      },
     ]);
     setLoading(intent);
+
     try {
+      if (intent === "translate") {
+        const lastAi = [...messages].reverse().find((m) => m.role === "ai");
+        const sourceText = lastAi?.text || DEFAULT_TRANSLATE_SOURCE;
+        const sourceId = lastAi?.chunkId;
+        const res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: sourceText, sourceId }),
+        });
+        const data = await res.json();
+        const { body, cite } = splitCite(data.translation || "");
+        setMessages((m) => [...m, { role: "ai", text: body, raw: body, cite, demo: data.demo }]);
+        return;
+      }
+
+      const turn = turnCounts.current[intent] ?? 0;
+      turnCounts.current[intent] = turn + 1;
+
+      // Real conversation memory: without this, the model can't tell what it
+      // already said, so "then?" / "what next?" has nothing to build on.
+      const history = messages
+        .filter((m) => m.raw !== undefined || m.role === "ai")
+        .map((m) => ({
+          role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+          content: m.raw ?? m.text,
+        }));
+
       const res = await fetch("/api/tutor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ intent, question: q, level, answer }),
+        body: JSON.stringify({ intent, question: q, level, answer: ans, turn, history }),
       });
       const data = await res.json();
       const { body, cite } = splitCite(data.reply || "");
-      setMessages((m) => [...m, { role: "ai", text: body, cite, demo: data.demo }]);
+      setMessages((m) => [...m, { role: "ai", text: body, raw: body, cite, demo: data.demo, chunkId: data.sourceId }]);
     } catch {
       setMessages((m) => [...m, { role: "ai", text: "⚠️ Network problem — please try again." }]);
     } finally {
