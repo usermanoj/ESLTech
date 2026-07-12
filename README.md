@@ -108,7 +108,7 @@ Teacher material upload with auto-question generation · real Supabase authentic
 
 ## Team
 
-**Founder & Builder** — 20+ years in enterprise banking technology at global financial institutions, building systems that must be correct, auditable, and trusted at scale. Currently founder of [Dhari AI](https://dhari.ai), building production-grade reasoning agents for regulated institutions with banking-grade rigor — the same discipline applied here to ESL education.
+**Manoj Bhardwaj — Founder & Builder** — 20+ years in enterprise banking technology at global financial institutions, building systems that must be correct, auditable, and trusted at scale. Currently founder of [Dhari AI](https://dhari.ai), building production-grade reasoning agents for regulated institutions with banking-grade rigor — the same discipline applied here to ESL education.
 
 ## License
 
