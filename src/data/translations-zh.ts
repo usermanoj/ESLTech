@@ -7,11 +7,16 @@
 // mainland PRC textbooks (which more often use 杠杆平衡条件/动力臂/阻力臂 for
 // levers). Worth a native-speaker sign-off before this goes to real students.
 export const ZH_TRANSLATIONS: Record<string, string> = {
+  // Previously this mixed two Chinese terms for "pivot" (支点 / 转动点) in one
+  // sentence — grammatically valid but ambiguous, and exactly the kind of
+  // construction that garbles on back-translation. Fixed to use 支点
+  // consistently throughout (matching the GLOSSARY entry for "pivot"), and
+  // to mirror each English sentence 1:1 instead of merging clauses.
   "m-def":
-    "力使物体转动的效果叫做力矩。力矩的大小取决于所加的力，以及这个力到支点（转动点）的垂直距离。" +
-    "力矩 = 力 × 到转动点的垂直距离。力的单位是牛顿（N），距离的单位是米（m），所以力矩的单位是牛顿·米（Nm）。",
+    "力的转动效应叫做力矩。力矩的大小取决于所施加的力，以及这个力到支点的距离。" +
+    "力矩 = 力 × 到支点的垂直距离。力的单位是牛顿（N），距离的单位是米（m），所以力矩的单位是牛顿·米（Nm）。",
   "m-principle":
-    "力矩原理指出：当一个物体处于平衡状态时，绕固定点（支点）的顺时针力矩总和，等于绕同一支点的逆时针力矩总和。",
+    "力矩原理指出：当物体处于平衡状态时，绕支点的顺时针力矩总和，等于绕同一支点的逆时针力矩总和。",
   "m-seesaw":
     "拉姆（Ram）的体重是200牛顿，坐在跷跷板支点左侧1.5米处。西亚姆（Shyam）坐在支点右侧1.0米处。" +
     "要使跷跷板保持平衡，顺时针力矩必须等于逆时针力矩：F₁×d₁ = F₂×d₂。" +
