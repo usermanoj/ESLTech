@@ -108,7 +108,7 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
     {
       role: "ai",
       text:
-        `Hi! I'm your ${topicTitle} tutor. I only use your class materials, and I'll always show you where the answer comes from. Pick a button below — I won't just give you answers, I'll help you learn. 🎓`,
+        `Hi! I'm your ${topicTitle} AI learning assistant. I only use your class materials, and I'll always show you where the answer comes from. Pick a button below — I won't just give you answers, I'll help you learn. 🎓`,
     },
   ]);
   const [question, setQuestion] = useState("");

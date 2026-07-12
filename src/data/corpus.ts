@@ -1,4 +1,4 @@
-// APPROVED TEACHER CORPUS — the ONLY knowledge source the AI Tutor may use.
+// APPROVED TEACHER CORPUS — the ONLY knowledge source the AI Learning Assistant may use.
 // Faithfully transcribed / paraphrased from the school's own Grade 7 Physics materials:
 //   - PPT: "Grade 7 physics Moments of force.pptx"
 //   - PPT: "4-Distance time graph.pptx"

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 const ROLES = [
-  { key: "student", label: "Student", icon: "🎒", desc: "Learn with a curriculum-locked AI tutor", href: "/subjects", primary: true },
+  { key: "student", label: "Student", icon: "🎒", desc: "Learn with a curriculum-locked AI guide", href: "/subjects", primary: true },
   { key: "teacher", label: "Teacher", icon: "👩‍🏫", desc: "Monitor AI use, track progress & misconceptions", href: "/teacher", primary: true },
   { key: "hod", label: "HOD", icon: "📊", desc: "Department analytics & curriculum coverage", href: "/hod" },
   { key: "principal", label: "Principal", icon: "🏫", desc: "School-wide dashboard & ESL improvement", href: "/principal" },
@@ -11,7 +11,7 @@ const FEATURES = [
   { icon: "🔒", title: "Closed-corpus AI", body: "Answers only from teacher-approved materials — with an exact citation every time." },
   { icon: "🌏", title: "Top-end translation", body: "Simplified English + Chinese (中文), tuned with a physics glossary for accuracy." },
   { icon: "🧲", title: "Interactive science", body: "Drag-and-feel simulations turn abstract physics into something you can play with." },
-  { icon: "🎯", title: "Guides, never cheats", body: "The tutor hints and asks questions — it won't do the assignment for you." },
+  { icon: "🎯", title: "Guides, never cheats", body: "The AI hints and asks questions — it won't do the assignment for you." },
   { icon: "📈", title: "Adaptive & transparent", body: "Adapts difficulty to each learner; every AI chat is visible to teachers." },
   { icon: "✅", title: "Trusted grading", body: "Numbers graded deterministically — never by a guessing chatbot." },
 ];

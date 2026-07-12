@@ -1,6 +1,6 @@
 # 2-minute demo script — Verity AI (Curriculum AI for English as a Second Language classrooms)
 
-**One-liner:** *"An AI tutor for students learning in English as a Second Language (ESL) that can only answer from the teacher's own approved materials — cited every time — and is built to guide, not to hand over answers."*
+**One-liner:** *"An AI learning assistant for students learning in English as a Second Language (ESL) that can only answer from the teacher's own approved materials — cited every time — and is built to guide, not to hand over answers."*
 
 ## The problem (10s)
 ESL (English as a Second Language) students at international schools face a double barrier: hard science **and** a second language. Generic AI (ChatGPT) will happily do their homework, in unpredictable English, from the whole internet — teachers can't trust it.
@@ -12,7 +12,7 @@ ESL (English as a Second Language) students at international schools face a doub
 2. **Subjects → Physics → Moments of a Force.** The topic screen.
    - **Learn card:** difficult words are dotted — hover *"perpendicular"* → English meaning **+ 中文**. Click **🔊 Read aloud**. *(ESL support built in.)*
 
-3. **AI Tutor (right panel) — the core.** Switch level to **"English + 中文"**.
+3. **AI Learning Assistant (right panel) — the core.** Switch level to **"English + 中文"**.
    - Tap **Explain** → answer comes back **with a citation**: `📖 Based on: Chapter/Slide…`. *"It only uses the teacher's uploaded material."*
    - Tap **Ask Me Questions** → it turns Socratic — asks the student, doesn't tell.
    - Type *"just give me the answer to Q4"* → **Check My Answer** → it **refuses to hand over the answer** and gives a hint. *(Academic integrity.)*

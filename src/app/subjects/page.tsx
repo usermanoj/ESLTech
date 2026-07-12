@@ -26,7 +26,7 @@ export default function Subjects() {
       </div>
 
       <h1 className="text-3xl font-bold tracking-tight">Good afternoon 👋</h1>
-      <p className="mt-1 text-[var(--muted)]">Pick a subject to continue learning. Your AI tutor is ready.</p>
+      <p className="mt-1 text-[var(--muted)]">Pick a subject to continue learning. Your AI learning assistant is ready.</p>
 
       <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {SUBJECTS.map((s) => {

@@ -152,7 +152,7 @@ export default function TeacherDashboard() {
               </div>
 
               <div className="mt-3 rounded-2xl bg-[rgba(99,102,241,0.12)] p-3 text-xs text-[var(--muted)]">
-                🔍 Full AI transparency — every message the student exchanged with the tutor, with flags. Nothing is hidden.
+                🔍 Full AI transparency — every message the student exchanged with the AI, with flags. Nothing is hidden.
               </div>
 
               <div className="mt-4 space-y-3">

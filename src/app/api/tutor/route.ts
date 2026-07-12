@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      { reply: `⚠️ The tutor had a problem: ${message}. Please try again.`, error: true },
+      { reply: `⚠️ The AI had a problem: ${message}. Please try again.`, error: true },
       { status: 200 },
     );
   }
