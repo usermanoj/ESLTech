@@ -2,23 +2,26 @@
 
 import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { CHECKABLE_CHUNK_IDS } from "@/lib/tutor";
 
 type Intent = "explain" | "translate" | "example" | "askme" | "check";
 type EslLevel = "advanced" | "intermediate" | "beginner" | "beginner_zh";
 type Msg = {
   role: "user" | "ai";
-  text: string;      // display text (may be prefixed with a button label for user turns)
-  raw?: string;       // the actual content sent to / returned from the model, for history
+  text: string;       // display text (may be prefixed with a button label for user turns)
+  raw?: string;        // the actual content sent to / returned from the model, for history
   cite?: string;
+  citeLabel?: string;  // human-readable source name, for the "Checking against" indicator
   demo?: boolean;
-  chunkId?: string;      // which approved-corpus chunk this AI reply was grounded in (demo mode)
+  intent?: Intent;        // which intent produced this AI reply (drives turn-reset logic)
+  chunkId?: string;       // which approved-corpus chunk this AI reply was grounded in (demo mode)
   isTranslation?: boolean; // true for a Translate result — never re-translate a translation
 };
 
 const BUTTONS: { intent: Intent; label: string; icon: string; hint: string }[] = [
   { intent: "explain", label: "Explain", icon: "💡", hint: "Explain this simply" },
   { intent: "example", label: "Give Example", icon: "🧮", hint: "Show a worked example" },
-  { intent: "askme", label: "Ask Me Questions", icon: "❓", hint: "Quiz me (Socratic)" },
+  { intent: "askme", label: "Ask Me Questions", icon: "❓", hint: "Quiz me, one question at a time" },
   { intent: "check", label: "Check My Answer", icon: "✅", hint: "Hint on my attempt" },
   { intent: "translate", label: "Translate", icon: "🌏", hint: "Translate the last reply" },
 ];
@@ -120,6 +123,21 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
   // question got mislabelled and answered as an unrelated new explanation.
   const [lastIntent, setLastIntent] = useState<Intent>("explain");
 
+  // The most recent grounded corpus chunk that is an actual numeric worked
+  // example (not a bare definition/principle) — the only thing "Check My
+  // Answer" can sensibly check against.
+  const lastCheckableChunkId = [...messages]
+    .reverse()
+    .find((m) => m.role === "ai" && m.chunkId && CHECKABLE_CHUNK_IDS.includes(m.chunkId))?.chunkId;
+  const canCheck = !!lastCheckableChunkId;
+  // Translate needs at least one real grounded explanation to translate —
+  // translating the generic greeting isn't useful, and there'd be no
+  // reviewed-translation match for it in demo mode.
+  const canTranslate = messages.some((m) => m.role === "ai" && m.chunkId && !m.isTranslation);
+  const checkableChunk = lastCheckableChunkId
+    ? messages.find((m) => m.chunkId === lastCheckableChunkId)?.citeLabel
+    : undefined;
+
   async function ask(intent: Intent) {
     if (intent === "check" && !showCheck) {
       setShowCheck(true);
@@ -166,13 +184,19 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
         return;
       }
 
-      const turn = turnCounts.current[intent] ?? 0;
+      // The rotation/"turn" for explain/example/askme should only advance if
+      // the student is CONTINUING that same thread with nothing else in
+      // between — otherwise Explain kept saying "let's go deeper" forever,
+      // even after the student had done several unrelated things.
+      const lastAiTurn = [...messages].reverse().find((m) => m.role === "ai");
+      const sameThread = lastAiTurn?.intent === intent;
+      const turn = sameThread ? (turnCounts.current[intent] ?? 0) : 0;
       turnCounts.current[intent] = turn + 1;
 
-      // Which approved-corpus problem the conversation is currently about —
-      // needed so "Check My Answer" can hint at the RIGHT problem instead of
-      // an unrelated hardcoded one.
-      const contextChunkId = [...messages].reverse().find((m) => m.role === "ai" && m.chunkId)?.chunkId;
+      // Which numeric worked example the conversation is about — needed so
+      // "Check My Answer" hints at the RIGHT problem (never a bare
+      // definition/principle, which has nothing to check).
+      const contextChunkId = lastCheckableChunkId;
 
       // Real conversation memory: without this, the model can't tell what it
       // already said, so "then?" / "what next?" has nothing to build on.
@@ -192,7 +216,16 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
       const { body, cite } = splitCite(data.reply || "");
       setMessages((m) => [
         ...m,
-        { role: "ai", text: body, raw: body, cite, demo: data.demo, chunkId: data.sourceId ?? contextChunkId },
+        {
+          role: "ai",
+          text: body,
+          raw: body,
+          cite,
+          citeLabel: cite,
+          demo: data.demo,
+          intent,
+          chunkId: data.sourceId ?? (intent === "check" ? contextChunkId : undefined),
+        },
       ]);
       if (intent === "explain" || intent === "example" || intent === "askme") setLastIntent(intent);
     } catch {
@@ -273,12 +306,17 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
       <AnimatePresence>
         {showCheck && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
+            {checkableChunk && (
+              <div className="mt-3 text-[11px] text-[var(--muted)]">
+                🎯 Checking against: <span className="text-[var(--brand2)]">{checkableChunk.replace("📖 Based on: ", "").replace(" (demo mode)", "")}</span>
+              </div>
+            )}
             <input
               autoFocus
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
               placeholder="Type your answer + working (e.g. 70 × 0.4 = 28 Nm clockwise)"
-              className="mt-3 w-full rounded-xl bg-black/20 px-3 py-2 text-sm outline-none ring-1 ring-[var(--border)] focus:ring-[var(--brand)]"
+              className="mt-1 w-full rounded-xl bg-black/20 px-3 py-2 text-sm outline-none ring-1 ring-[var(--border)] focus:ring-[var(--brand)]"
               onKeyDown={(e) => e.key === "Enter" && ask("check")}
             />
           </motion.div>
@@ -298,19 +336,34 @@ export default function AiTutorPanel({ topicTitle }: { topicTitle: string }) {
           onKeyDown={(e) => e.key === "Enter" && ask(lastIntent)}
         />
         <div className="grid grid-cols-5 gap-2">
-          {BUTTONS.map((b) => (
-            <button
-              key={b.intent}
-              onClick={() => ask(b.intent)}
-              disabled={!!loading}
-              title={b.hint}
-              className="group flex flex-col items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 py-3 text-center transition hover:-translate-y-0.5 hover:border-[var(--brand)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-            >
-              <span className="text-xl transition group-hover:scale-110">{b.icon}</span>
-              <span className="text-[11px] font-medium leading-tight">{b.label}</span>
-            </button>
-          ))}
+          {BUTTONS.map((b) => {
+            const gated =
+              (b.intent === "check" && !canCheck) || (b.intent === "translate" && !canTranslate);
+            const title = gated
+              ? b.intent === "check"
+                ? 'Tap "Give Example" first so I know what problem to check'
+                : "Ask to Explain or Give Example first, then Translate it"
+              : b.hint;
+            return (
+              <button
+                key={b.intent}
+                onClick={() => ask(b.intent)}
+                disabled={!!loading || gated}
+                title={title}
+                className="group flex flex-col items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 py-3 text-center transition hover:-translate-y-0.5 hover:border-[var(--brand)] hover:bg-[var(--surface-2)] disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:translate-y-0 disabled:hover:border-[var(--border)]"
+              >
+                <span className="text-xl transition group-hover:scale-110">{b.icon}</span>
+                <span className="text-[11px] font-medium leading-tight">{b.label}</span>
+              </button>
+            );
+          })}
         </div>
+        {(!canCheck || !canTranslate) && (
+          <div className="mt-2 text-[10px] text-[var(--muted)]">
+            {!canCheck && "Check My Answer unlocks after Give Example (or Explain reaches a worked example). "}
+            {!canTranslate && "Translate unlocks after your first Explain or Example."}
+          </div>
+        )}
       </div>
     </div>
   );

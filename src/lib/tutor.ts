@@ -31,21 +31,22 @@ const INTENT_GUIDE: Record<Intent, string> = {
   example:
     "Give ONE clear worked EXAMPLE from the approved material, showing the formula and each step. Then invite the student to try a similar one.",
   askme:
-    "Do NOT explain. Ask the student 2–3 short GUIDING questions (Socratic) that lead them toward understanding. Wait for their thinking.",
+    "Ask the student exactly ONE short guiding (Socratic) question — never two at once. Do NOT explain the concept yourself. Wait for their answer.",
   check:
     "The student will show their attempt. Give a HINT about what to check — never just the answer. Point them to the relevant rule or step.",
   translate: "Translate faithfully; keep physics terms accurate.",
 };
 
 // "askme" needs a different instruction once the student has actually replied
-// to a previous guiding question — otherwise the model just fires MORE
-// unrelated questions instead of reacting to what the student said.
+// to the previous guiding question — otherwise the model just fires more
+// unrelated questions instead of honestly reacting to what the student said.
 function intentGuide(intent: Intent, turn: number): string {
   if (intent === "askme" && turn > 0) {
     return (
-      "The student has just responded to your previous guiding question(s) — check the conversation history for what they said. " +
-      "Briefly react to it (confirm if they're on the right track, or gently correct a misconception using the approved material), " +
-      "THEN ask 1–2 NEW guiding questions that go further. Do not just repeat earlier questions."
+      "The student has just answered your previous guiding question — read their answer in the conversation history. " +
+      "Tell them plainly whether they are right, partly right, or off track, grounded ONLY in the approved material " +
+      "(do not praise an answer you have not actually evaluated). Briefly give the correct idea if they were off. " +
+      "THEN ask exactly ONE new guiding question that goes further — never two at once."
     );
   }
   return INTENT_GUIDE[intent];
@@ -55,7 +56,7 @@ export function buildSystemPrompt(topicId: string, level: EslLevel, intent: Inte
   const chunks = corpusForTopic(topicId);
   const progressNote =
     turn > 0
-      ? `\n6. The student has used "${intent}" ${turn + 1} times in this conversation — look at the conversation history and do NOT repeat a previous reply. Go deeper, use a different worked example, or ask different guiding questions than before.`
+      ? `\n6. The student is continuing the same "${intent}" thread (turn ${turn + 1}) — look at the conversation history and do NOT repeat a previous reply. Go deeper, use a different worked example, or ask a different guiding question than before.`
       : "";
   return `You are the ESL Learning Hub tutor for ${TOPIC.grade} ${TOPIC.subject}, topic "${TOPIC.title}".
 You are a patient guide for English-as-a-Second-Language students at an international school (IG & IB curriculum).
@@ -78,39 +79,25 @@ export type FallbackResult = { text: string; sourceId?: string };
 
 // Rotation order for demo/offline mode — every repeated tap of a button
 // surfaces genuinely different, corpus-grounded content instead of a static
-// canned reply. (Live mode gets real variety from conversation memory instead;
-// see route.ts, which now threads full history to Claude.)
+// canned reply. `turn` is computed by the client as "how many times in a row
+// (with nothing else in between) has this exact intent been used" — so it
+// resets to 0, and this rotation restarts from the top, whenever the student
+// does something else first. (Live mode gets real variety from conversation
+// memory instead; see route.ts, which threads full history to Claude.)
 const EXPLAIN_IDS = ["m-def", "m-principle", "m-net", "m-ws7-lever"];
 const EXAMPLE_IDS = ["m-seesaw", "m-rearrange", "m-ws7-rock"];
-const ASKME_SETS: { chunkId: string; qs: string[] }[] = [
-  {
-    chunkId: "m-def",
-    qs: [
-      "What two things does the size of a moment depend on?",
-      "What is the unit of a moment, and why is it that unit?",
-    ],
-  },
-  {
-    chunkId: "m-principle",
-    qs: [
-      "When a seesaw is balanced, what must be true about the clockwise and anticlockwise moments?",
-      "What do we call the fixed point a beam turns around?",
-    ],
-  },
-  {
-    chunkId: "m-net",
-    qs: [
-      "If the clockwise moments add up to more than the anticlockwise moments, which way will the beam turn?",
-      "How do you work out the net moment when several forces act on a beam?",
-    ],
-  },
-  {
-    chunkId: "m-ws7-lever",
-    qs: [
-      "Besides the number, what two other things must you always state in a moments answer?",
-      "Why must you convert distances to metres before calculating a moment?",
-    ],
-  },
+
+// One guiding question at a time — never bundle two, so it's always
+// unambiguous which question the student is answering.
+const ASKME_QUESTIONS: { chunkId: string; q: string }[] = [
+  { chunkId: "m-def", q: "What two things does the size of a moment depend on?" },
+  { chunkId: "m-def", q: "What is the unit of a moment, and why is it that unit?" },
+  { chunkId: "m-principle", q: "When a seesaw is balanced, what must be true about the clockwise and anticlockwise moments?" },
+  { chunkId: "m-principle", q: "What do we call the fixed point a beam turns around?" },
+  { chunkId: "m-net", q: "If the clockwise moments add up to more than the anticlockwise moments, which way will the beam turn?" },
+  { chunkId: "m-net", q: "How do you work out the net moment when several forces act on a beam?" },
+  { chunkId: "m-ws7-lever", q: "Besides the number, what two other things must you always state in a moments answer?" },
+  { chunkId: "m-ws7-lever", q: "Why must you convert distances to metres before calculating a moment?" },
 ];
 
 function byId(id: string): CorpusChunk {
@@ -123,8 +110,11 @@ const citeOf = (c: CorpusChunk) => `📖 Based on: ${c.source} (demo mode)`;
 // Hints for "Check My Answer", one per numeric worked-example chunk — used
 // only when we know WHICH problem the student is working on (contextChunkId).
 // Without that, there is nothing real to check, so we say so honestly instead
-// of guessing (see the "check" case below).
-const CHECK_HINTS: Record<string, string> = {
+// of guessing (see the "check" case below). Exported so the client can gate
+// the Check button itself: it should only be enabled once one of these
+// numeric chunks has actually been shown (via Explain or Give Example) —
+// checking against a bare definition/principle chunk makes no sense.
+export const CHECK_HINTS: Record<string, string> = {
   "m-seesaw":
     "did you set clockwise moment = anticlockwise moment (F₁×d₁ = F₂×d₂)? Have you correctly identified which weight or distance you're solving for?",
   "m-rearrange":
@@ -134,6 +124,7 @@ const CHECK_HINTS: Record<string, string> = {
   "m-ws7-rock":
     "did you calculate the moment for the person AND the rock separately (Moment = Force × distance for each) before comparing them?",
 };
+export const CHECKABLE_CHUNK_IDS = Object.keys(CHECK_HINTS);
 
 // Deterministic fallback so the UI is fully demoable before an API key is set.
 export function fallbackReply(
@@ -158,21 +149,23 @@ export function fallbackReply(
       };
     }
     case "askme": {
-      const setIdx = turn % ASKME_SETS.length;
-      const set = ASKME_SETS[setIdx];
-      const c = byId(set.chunkId);
-      const qs = set.qs.map((q, i) => `${i + 1}. ${q}`).join("\n");
+      const idx = turn % ASKME_QUESTIONS.length;
+      const item = ASKME_QUESTIONS[idx];
+      const c = byId(item.chunkId);
       if (turn === 0) {
-        return { text: `Let's think it through together:\n${qs}\n\n${citeOf(c)}`, sourceId: set.chunkId };
+        return { text: `Let's think it through:\n${item.q}\n\n${citeOf(c)}`, sourceId: item.chunkId };
       }
-      // The student has replied to the previous question(s) — acknowledge and
-      // reveal the key idea behind THAT question before asking new ones, so
-      // this feels like a real back-and-forth instead of a random restart.
-      const prevSet = ASKME_SETS[(turn - 1) % ASKME_SETS.length];
-      const prevChunk = byId(prevSet.chunkId);
+      // We can't grade free-text in demo mode, so we never claim to have
+      // evaluated it — instead, honestly hand over the relevant fact so the
+      // student can compare it against their own answer, then ask the next
+      // single question.
+      const prevItem = ASKME_QUESTIONS[(turn - 1) % ASKME_QUESTIONS.length];
+      const prevChunk = byId(prevItem.chunkId);
       return {
-        text: `Nice thinking! Here's the key idea to check your answer against: ${prevChunk.text}\n\nNow let's go further:\n${qs}\n\n${citeOf(c)}`,
-        sourceId: set.chunkId,
+        text:
+          `Thanks for answering. Here's the approved material to compare your answer with: ${prevChunk.text}\n\n` +
+          `Next question:\n${item.q}\n\n${citeOf(c)}`,
+        sourceId: item.chunkId,
       };
     }
     case "check": {
@@ -183,12 +176,12 @@ export function fallbackReply(
           sourceId: contextChunkId,
         };
       }
-      // No established problem in this conversation — don't guess or point at
-      // an unrelated worksheet. Ask the student to establish context first.
+      // No established numeric problem in this conversation — don't guess or
+      // point at an unrelated worksheet.
       return {
         text:
           "I don't have a specific question in view yet, so I can't check your working against the right numbers. " +
-          'Tap "Explain" or "Give Example" first (or type the question above), then tap Check My Answer again.',
+          'Tap "Give Example" first (or ask to Explain a worked example), then tap Check My Answer again.',
       };
     }
     case "translate": {
