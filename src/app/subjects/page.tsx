@@ -1,15 +1,17 @@
 import Link from "next/link";
 
 const SUBJECTS = [
-  { id: "physics", name: "Physics", icon: "🧲", color: "#22d3ee", topics: 6, ready: true, blurb: "Mechanics · Moments · Magnetism" },
+  { id: "physics", name: "Physics", icon: "🧲", color: "#22d3ee", topics: 1, ready: true, blurb: "Moments of a Force (5 more topics planned)" },
   { id: "math", name: "Mathematics", icon: "📐", color: "#6366f1", topics: 0, ready: false, blurb: "Algebra · Geometry · Data" },
   { id: "science", name: "Science", icon: "🔬", color: "#34d399", topics: 0, ready: false, blurb: "Biology · Chemistry · Energy" },
   { id: "english", name: "English", icon: "📖", color: "#f472b6", topics: 0, ready: false, blurb: "Reading · Grammar · Essays" },
 ];
 
-const TASKS = [
+// href is only set for tasks with a real, built topic page — everything else
+// shows "Coming soon" rather than linking to the wrong content.
+const TASKS: { subject: string; title: string; due: string; status: string; href?: string }[] = [
   { subject: "Physics", title: "Moments of a Force", due: "This week", status: "In progress", href: "/topics/moments" },
-  { subject: "Physics", title: "Distance–Time Graphs", due: "Next week", status: "Not started", href: "/topics/moments" },
+  { subject: "Physics", title: "Distance–Time Graphs", due: "Next week", status: "Coming soon" },
 ];
 
 export default function Subjects() {
@@ -36,7 +38,7 @@ export default function Subjects() {
               <div className="font-semibold">{s.name}</div>
               <div className="mt-0.5 text-xs text-[var(--muted)]">{s.blurb}</div>
               <div className="mt-3 text-xs" style={{ color: s.ready ? s.color : "var(--muted)" }}>
-                {s.ready ? `${s.topics} topics · open →` : "Coming soon"}
+                {s.ready ? `${s.topics} topic${s.topics === 1 ? "" : "s"} · open →` : "Coming soon"}
               </div>
             </div>
           );
@@ -71,7 +73,11 @@ export default function Subjects() {
                     <span className={`rounded-full px-2 py-0.5 text-xs ${t.status === "In progress" ? "bg-[rgba(99,102,241,0.2)] text-[var(--brand2)]" : "bg-white/10 text-[var(--muted)]"}`}>{t.status}</span>
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <Link href={t.href} className="text-[var(--brand2)] hover:underline">Open →</Link>
+                    {t.href ? (
+                      <Link href={t.href} className="text-[var(--brand2)] hover:underline">Open →</Link>
+                    ) : (
+                      <span className="text-[var(--muted)]">Not built yet</span>
+                    )}
                   </td>
                 </tr>
               ))}

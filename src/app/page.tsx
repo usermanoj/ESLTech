@@ -3,8 +3,8 @@ import Link from "next/link";
 const ROLES = [
   { key: "student", label: "Student", icon: "🎒", desc: "Learn with a curriculum-locked AI tutor", href: "/subjects", primary: true },
   { key: "teacher", label: "Teacher", icon: "👩‍🏫", desc: "Monitor AI use, track progress & misconceptions", href: "/teacher", primary: true },
-  { key: "hod", label: "HOD", icon: "📊", desc: "Department analytics & curriculum coverage", href: "/teacher" },
-  { key: "principal", label: "Principal", icon: "🏫", desc: "School-wide dashboard & ESL improvement", href: "/teacher" },
+  { key: "hod", label: "HOD", icon: "📊", desc: "Department analytics & curriculum coverage", href: "/hod" },
+  { key: "principal", label: "Principal", icon: "🏫", desc: "School-wide dashboard & ESL improvement", href: "/principal" },
 ];
 
 const FEATURES = [
