@@ -150,6 +150,16 @@ These are product requirements in the buyer's eyes, not internal checkboxes:
 
 ---
 
+## 7. Environments
+
+- **Production** — `main` branch, auto-deployed by Vercel's GitHub integration to `esltech.vercel.app` on every push.
+- **Staging** — `staging` branch, auto-deployed by the same integration to its own Vercel-assigned preview URL. Workflow: land feature work on `staging` first, verify there, then merge `staging` → `main` to release.
+- **CI gate** — every push/PR to `main` runs `.github/workflows/ci.yml` (lint, build, vitest). Branch protection on `main` requires the `build-and-test` check and blocks force-pushes/deletions; repo admins remain able to push directly (`enforce_admins: false`) since there's no second engineer yet to review PRs.
+
+**Known gap:** no `ANTHROPIC_API_KEY` is currently set in Vercel's project environment variables, so both production and staging silently fall back to canned "demo mode" replies (see `hasApiKey()` in `src/app/api/tutor/route.ts`) instead of real Claude-powered tutoring. Add the key via the Vercel dashboard → Project Settings → Environment Variables (scope it to whichever environments should run live) before treating either environment as functionally complete.
+
+---
+
 ## A closing caution
 
 The biggest risk in this codebase is not any single gap above — it's the temptation to demo it to schools *as if* the Teacher/HOD/Principal dashboards are already real. Sell the vision with the prototype, but sequence real data before real classrooms. The trust story is the entire brand; it has to be true internally before it becomes a claim made externally.
