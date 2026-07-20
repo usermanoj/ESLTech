@@ -9,6 +9,8 @@ const glossaryLines = Object.entries(GLOSSARY)
   .map(([en, v]) => `- "${en}" → ${v.zh}`)
   .join("\n");
 
+const MAX_TEXT_LEN = 2000;
+
 export async function POST(req: NextRequest) {
   try {
     const { text, target, sourceId } = (await req.json()) as {
@@ -16,6 +18,13 @@ export async function POST(req: NextRequest) {
       target?: string;
       sourceId?: string;
     };
+
+    // Defense in depth: reject oversized input before it reaches Claude,
+    // regardless of the middleware's rate limit.
+    if (!text || text.length > MAX_TEXT_LEN) {
+      return NextResponse.json({ translation: "Invalid request.", error: true }, { status: 400 });
+    }
+
     const lang = target || "Simplified Chinese (简体中文)";
 
     if (!hasApiKey()) {

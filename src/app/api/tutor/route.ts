@@ -7,9 +7,14 @@ export const runtime = "nodejs";
 
 type HistoryTurn = { role: "user" | "assistant"; content: string };
 
+const VALID_INTENTS: Intent[] = ["explain", "translate", "example", "askme", "check"];
+const VALID_LEVELS: EslLevel[] = ["advanced", "intermediate", "beginner", "beginner_zh"];
+const MAX_TEXT_LEN = 2000;
+const MAX_HISTORY_TURNS = 40;
+
 export async function POST(req: NextRequest) {
   try {
-    const { topicId, intent, question, level, answer, turn, history, contextChunkId } = (await req.json()) as {
+    const body = (await req.json()) as {
       topicId?: string;
       intent: Intent;
       question: string;
@@ -19,6 +24,24 @@ export async function POST(req: NextRequest) {
       history?: HistoryTurn[];
       contextChunkId?: string;
     };
+
+    // Defense in depth: reject malformed/oversized input cheaply, before it
+    // ever reaches Claude — bounds cost per request regardless of the
+    // middleware's rate limit.
+    if (!VALID_INTENTS.includes(body.intent)) {
+      return NextResponse.json({ reply: "Invalid request.", error: true }, { status: 400 });
+    }
+    if (body.level !== undefined && !VALID_LEVELS.includes(body.level)) {
+      return NextResponse.json({ reply: "Invalid request.", error: true }, { status: 400 });
+    }
+    if ((body.question?.length ?? 0) > MAX_TEXT_LEN || (body.answer?.length ?? 0) > MAX_TEXT_LEN) {
+      return NextResponse.json({ reply: "That message is too long.", error: true }, { status: 400 });
+    }
+    if (body.history && body.history.length > MAX_HISTORY_TURNS) {
+      return NextResponse.json({ reply: "Conversation too long — please start a new topic.", error: true }, { status: 400 });
+    }
+
+    const { topicId, intent, question, level, answer, turn, history, contextChunkId } = body;
     const turnNum = turn ?? 0;
     const topic = topicId ?? "moments";
 
