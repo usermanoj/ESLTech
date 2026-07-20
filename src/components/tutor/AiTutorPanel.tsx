@@ -7,6 +7,7 @@ import { CHECKABLE_CHUNK_IDS } from "@/lib/tutor";
 type Intent = "explain" | "translate" | "example" | "askme" | "check";
 type EslLevel = "advanced" | "intermediate" | "beginner" | "beginner_zh";
 type Msg = {
+  id: string;
   role: "user" | "ai";
   text: string;       // display text (may be prefixed with a button label for user turns)
   raw?: string;        // the actual content sent to / returned from the model, for history
@@ -16,6 +17,7 @@ type Msg = {
   intent?: Intent;        // which intent produced this AI reply (drives turn-reset logic)
   chunkId?: string;       // which approved-corpus chunk this AI reply was grounded in (demo mode)
   isTranslation?: boolean; // true for a Translate result — never re-translate a translation
+  streaming?: boolean;     // true while text is still arriving
 };
 
 const BUTTONS: { intent: Intent; label: string; icon: string; hint: string }[] = [
@@ -35,6 +37,12 @@ const LEVELS: { id: EslLevel; label: string }[] = [
 
 const DEFAULT_TRANSLATE_SOURCE =
   "A moment is the turning effect of a force. Moment = force × perpendicular distance from the pivot.";
+
+let idCounter = 0;
+function nextId(): string {
+  idCounter += 1;
+  return `m${idCounter}`;
+}
 
 function splitCite(text: string): { body: string; cite?: string } {
   const idx = text.indexOf("📖 Based on:");
@@ -101,11 +109,52 @@ function speak(text: string) {
     synth.resume();
   }, 5000);
 }
+
+// Reads the newline-delimited-JSON stream from /api/tutor, calling onDelta
+// for each incremental chunk of text and returning the final metadata once
+// the stream ends. Newline-delimited JSON (rather than raw SSE) keeps the
+// wire format trivial to produce server-side and to parse here.
+async function consumeNdjsonStream(
+  res: Response,
+  onDelta: (accumulated: string) => void,
+): Promise<{ text: string; demo: boolean; sourceId?: string; error?: boolean }> {
+  if (!res.body) throw new Error("No response body");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated = "";
+  let demo = false;
+  let sourceId: string | undefined;
+  let error = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIdx: number;
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx);
+      buffer = buffer.slice(newlineIdx + 1);
+      if (!line.trim()) continue;
+      const evt = JSON.parse(line) as { type: string; text?: string; demo?: boolean; sourceId?: string; error?: boolean };
+      if (evt.type === "delta" && evt.text) {
+        accumulated += evt.text;
+        onDelta(accumulated);
+      } else if (evt.type === "done") {
+        demo = !!evt.demo;
+        sourceId = evt.sourceId;
+        error = !!evt.error;
+      }
+    }
+  }
+  return { text: accumulated, demo, sourceId, error };
+}
 // ---------------------------------------------------------------------------
 
 export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string; topicTitle: string }) {
   const [messages, setMessages] = useState<Msg[]>([
     {
+      id: nextId(),
       role: "ai",
       text:
         `Hi! I'm your ${topicTitle} AI learning assistant. I only use your class materials, and I'll always show you where the answer comes from. Pick a button below — I won't just give you answers, I'll help you learn. 🎓`,
@@ -138,6 +187,10 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
     ? messages.find((m) => m.chunkId === lastCheckableChunkId)?.citeLabel
     : undefined;
 
+  function scrollToBottom() {
+    scrollRef.current?.scrollTo({ top: 1e9, behavior: "smooth" });
+  }
+
   async function ask(intent: Intent) {
     if (intent === "check" && !showCheck) {
       setShowCheck(true);
@@ -155,6 +208,7 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
     setMessages((m) => [
       ...m,
       {
+        id: nextId(),
         role: "user",
         text: intent === "check" ? `Check my answer: ${ans || "(my working)"}` : `${label}: ${q}`,
         raw: userRaw,
@@ -179,7 +233,7 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
         const { body, cite } = splitCite(data.translation || "");
         setMessages((m) => [
           ...m,
-          { role: "ai", text: body, raw: body, cite, demo: data.demo, isTranslation: true, chunkId: sourceId },
+          { id: nextId(), role: "ai", text: body, raw: body, cite, demo: data.demo, isTranslation: true, chunkId: sourceId },
         ]);
         return;
       }
@@ -212,28 +266,48 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topicId, intent, question: q, level, answer: ans, turn, history, contextChunkId }),
       });
-      const data = await res.json();
-      const { body, cite } = splitCite(data.reply || "");
-      setMessages((m) => [
-        ...m,
-        {
-          role: "ai",
-          text: body,
-          raw: body,
-          cite,
-          citeLabel: cite,
-          demo: data.demo,
-          intent,
-          chunkId: data.sourceId ?? (intent === "check" ? contextChunkId : undefined),
-        },
-      ]);
+
+      // Stream the reply in: the first delta creates the AI bubble and hides
+      // the loading dots, subsequent deltas grow it in place by id — no
+      // more waiting on a frozen screen for the full 800-token reply.
+      const streamId = nextId();
+      let started = false;
+      const result = await consumeNdjsonStream(res, (accumulated) => {
+        if (!started) {
+          started = true;
+          setLoading(null);
+          setMessages((m) => [...m, { id: streamId, role: "ai", text: accumulated, streaming: true }]);
+        } else {
+          setMessages((m) => m.map((msg) => (msg.id === streamId ? { ...msg, text: accumulated } : msg)));
+        }
+        scrollToBottom();
+      });
+
+      const { body, cite } = splitCite(result.text);
+      setMessages((m) =>
+        m.map((msg) =>
+          msg.id === streamId
+            ? {
+                ...msg,
+                text: body,
+                raw: body,
+                cite,
+                citeLabel: cite,
+                demo: result.demo,
+                intent,
+                chunkId: result.sourceId ?? (intent === "check" ? contextChunkId : undefined),
+                streaming: false,
+              }
+            : msg,
+        ),
+      );
       if (intent === "explain" || intent === "example" || intent === "askme") setLastIntent(intent);
     } catch {
-      setMessages((m) => [...m, { role: "ai", text: "⚠️ Network problem — please try again." }]);
+      setMessages((m) => [...m, { id: nextId(), role: "ai", text: "⚠️ Network problem — please try again." }]);
     } finally {
       setLoading(null);
       setShowCheck(false);
-      setTimeout(() => scrollRef.current?.scrollTo({ top: 1e9, behavior: "smooth" }), 60);
+      setTimeout(scrollToBottom, 60);
     }
   }
 
@@ -260,9 +334,9 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
 
       <div ref={scrollRef} className="min-h-[240px] flex-1 space-y-3 overflow-y-auto pr-1">
         <AnimatePresence initial={false}>
-          {messages.map((m, i) => (
+          {messages.map((m) => (
             <motion.div
-              key={i}
+              key={m.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
@@ -274,13 +348,16 @@ export default function AiTutorPanel({ topicId, topicTitle }: { topicId: string;
                     : "glass text-[var(--text)]"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{m.text}</p>
+                <p className="whitespace-pre-wrap">
+                  {m.text}
+                  {m.streaming && <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-current align-text-bottom" />}
+                </p>
                 {m.cite && (
                   <div className="mt-2 rounded-lg bg-[rgba(34,211,238,0.12)] px-2 py-1 text-xs text-[var(--brand2)]">
                     {m.cite}
                   </div>
                 )}
-                {m.role === "ai" && (
+                {m.role === "ai" && !m.streaming && (
                   <div className="mt-1.5 flex items-center gap-3">
                     <button onClick={() => speak(m.text)} className="text-xs text-[var(--muted)] hover:text-[var(--text)]">🔊 Read aloud</button>
                     {m.demo && <span className="text-[10px] text-[var(--warn)]">demo mode (no API key)</span>}
