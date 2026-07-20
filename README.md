@@ -90,7 +90,7 @@ Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · Framer Motion · Ant
 
 ```bash
 npm install
-cp .env.local.example .env.local   # add ANTHROPIC_API_KEY for the live AI
+cp .env.local.example .env.local   # add AI_GATEWAY_API_KEY for the live AI
 npm run dev                        # http://localhost:3000
 ```
 

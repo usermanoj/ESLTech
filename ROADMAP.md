@@ -18,7 +18,7 @@
 - **Corpus, translations, and practice banks are hardcoded TypeScript files** (`src/data/corpus.ts`, `translations-zh.ts`, `practice-banks.ts`). Fine for 2 topics; impossible at the scale of a real school's full curriculum. The whole content layer needs to move to a database with a real ingestion pipeline.
 - **No authentication, no persistence.** Teacher/HOD/Principal dashboards run on illustrative mock data (`src/data/monitoring.ts`, `department.ts`). Every visitor shares the same anonymous session.
 - **No streaming.** The tutor waits for the full Claude response before showing anything — at ~800 tokens that's a 5–15s frozen screen. Real students will assume it's broken.
-- **A real security gap:** once `ANTHROPIC_API_KEY` is set, `/api/tutor` and `/api/translate` become open, unauthenticated endpoints anyone on the internet can call. **This must close before the key ever goes into a real deployment** — see [Phase 0](#phase-0--harden-the-foundation).
+- **A real security gap:** once live AI Gateway credentials are set, `/api/tutor` and `/api/translate` become open, unauthenticated endpoints anyone on the internet can call. **This must close before the key ever goes into a real deployment** — see [Phase 0](#phase-0--harden-the-foundation).
 - **Single-tenant by construction.** One school, one corpus, no isolation between classes or schools.
 
 **Verdict:** this is a validated prototype with a proven interaction model, not a false start. The plan below keeps the "brain" (prompting, grading, state machine, design system) and rebuilds the "body" (data, auth, content pipeline) underneath it. This is deliberately **not** a rewrite.
@@ -156,7 +156,9 @@ These are product requirements in the buyer's eyes, not internal checkboxes:
 - **Staging** — `staging` branch, auto-deployed by the same integration to its own Vercel-assigned preview URL. Workflow: land feature work on `staging` first, verify there, then merge `staging` → `main` to release.
 - **CI gate** — every push/PR to `main` runs `.github/workflows/ci.yml` (lint, build, vitest). Branch protection on `main` requires the `build-and-test` check and blocks force-pushes/deletions; repo admins remain able to push directly (`enforce_admins: false`) since there's no second engineer yet to review PRs.
 
-**Known gap:** no `ANTHROPIC_API_KEY` is currently set in Vercel's project environment variables, so both production and staging silently fall back to canned "demo mode" replies (see `hasApiKey()` in `src/app/api/tutor/route.ts`) instead of real Claude-powered tutoring. Add the key via the Vercel dashboard → Project Settings → Environment Variables (scope it to whichever environments should run live) before treating either environment as functionally complete.
+**Known gap:** no `AI_GATEWAY_API_KEY` (or Vercel OIDC token) is currently set in Vercel's project environment variables, so both production and staging silently fall back to canned "demo mode" replies (see `hasApiKey()` in `src/lib/ai.ts`) instead of real AI-powered tutoring. Add a key via the Vercel dashboard → Project Settings → AI Gateway (or enable AI Gateway for the project so `VERCEL_OIDC_TOKEN` is provisioned automatically) before treating either environment as functionally complete.
+
+**Model-agnostic by design:** the AI layer (`src/lib/ai.ts`) routes through the Vercel AI Gateway using plain `"provider/model"` strings via the `ai` SDK — switching from Claude to GPT, Gemini, DeepSeek, Qwen, Kimi, etc. is an `AI_MODEL` env var change, not a code change (see `.env.local.example`).
 
 ---
 
