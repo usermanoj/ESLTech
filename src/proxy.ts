@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Interim, best-effort protection for the AI-calling routes until real
 // per-user auth (Phase 1) and a persistent rate-limit store (Vercel KV /
-// Upstash) are in place. This exists because the moment ANTHROPIC_API_KEY is
-// set, /api/tutor and /api/translate become open endpoints anyone on the
-// internet can call — burning API credits with no rate limit at all. This
-// proxy meaningfully raises the bar; it is NOT a substitute for real
+// Upstash) are in place. This exists because the moment live AI Gateway
+// credentials are set, /api/tutor and /api/translate become open endpoints
+// anyone on the internet can call — burning API credits with no rate limit
+// at all. This proxy meaningfully raises the bar; it is NOT a substitute for real
 // authentication. See ROADMAP.md Phase 0/1.
 //
 // (Named `proxy.ts` per Next.js 16 — this file convention replaced the

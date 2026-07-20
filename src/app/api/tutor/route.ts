@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { claude, hasApiKey, MODEL } from "@/lib/claude";
+import { streamText } from "ai";
+import { MODEL, hasApiKey, cachedSystem } from "@/lib/ai";
 import { buildSystemPrompt, fallbackReply, type Intent, type EslLevel } from "@/lib/tutor";
 import { contentRepo } from "@/lib/content-repo";
 
@@ -97,16 +98,15 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const claudeStream = claude().messages.stream({
+        const result = streamText({
           model: MODEL,
-          max_tokens: 800,
-          system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+          maxOutputTokens: 800,
+          system: cachedSystem(system),
           messages: [...priorTurns, { role: "user", content: userText }],
         });
-        claudeStream.on("text", (textDelta) => {
+        for await (const textDelta of result.textStream) {
           controller.enqueue(jsonLine({ type: "delta", text: textDelta }));
-        });
-        await claudeStream.finalMessage();
+        }
         controller.enqueue(jsonLine({ type: "done", demo: false }));
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";

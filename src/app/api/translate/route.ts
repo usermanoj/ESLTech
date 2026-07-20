@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { claude, hasApiKey, MODEL } from "@/lib/claude";
+import { generateText } from "ai";
+import { TRANSLATE_MODEL, hasApiKey } from "@/lib/ai";
 import { contentRepo } from "@/lib/content-repo";
 
 export const runtime = "nodejs";
@@ -46,22 +47,17 @@ export async function POST(req: NextRequest) {
       .map(([en, v]) => `- "${en}" → ${v.zh}`)
       .join("\n");
 
-    const msg = await claude().messages.create({
-      model: process.env.ANTHROPIC_TRANSLATE_MODEL || MODEL,
-      max_tokens: 700,
+    const result = await generateText({
+      model: TRANSLATE_MODEL,
+      maxOutputTokens: 700,
       system:
         `You are a professional bilingual physics teacher translating study material into ${lang} for a Grade 7 ESL student. ` +
         `Translate faithfully and naturally, keeping the scientific meaning exact. Use this approved terminology glossary for consistency:\n${glossaryLines}\n` +
         `Return ONLY the translation, no preamble.`,
-      messages: [{ role: "user", content: text }],
+      prompt: text,
     });
 
-    const translation = msg.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { text: string }).text)
-      .join("\n");
-
-    return NextResponse.json({ translation, demo: false });
+    return NextResponse.json({ translation: result.text, demo: false });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ translation: `⚠️ ${message}`, error: true }, { status: 200 });
