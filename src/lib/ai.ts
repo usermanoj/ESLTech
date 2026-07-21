@@ -12,6 +12,9 @@
 export const MODEL = process.env.AI_MODEL || "anthropic/claude-sonnet-5";
 export const TRANSLATE_MODEL = process.env.AI_TRANSLATE_MODEL || MODEL;
 
+// AI_GATEWAY_API_KEY is scoped per Vercel environment (Production, and
+// Preview restricted to the staging branch) — other branches' PR previews
+// have no value here and correctly stay in demo mode.
 export const hasApiKey = () =>
   Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN);
 
