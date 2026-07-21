@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
-import { TRANSLATE_MODEL, hasApiKey } from "@/lib/ai";
+import { TRANSLATE_MODEL, GATEWAY_FALLBACK_MODELS, hasApiKey } from "@/lib/ai";
 import { hasLangfuse } from "@/lib/observability";
 import { contentRepo } from "@/lib/content-repo";
 
@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
         `Return ONLY the translation, no preamble.`,
       prompt: text,
       experimental_telemetry: { isEnabled: hasLangfuse(), functionId: "translate" },
+      providerOptions: { gateway: { models: GATEWAY_FALLBACK_MODELS } },
     });
 
     return NextResponse.json({ translation: result.text, demo: false });

@@ -1,6 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
-import { MODEL } from "@/lib/ai";
+import { MODEL, GATEWAY_FALLBACK_MODELS } from "@/lib/ai";
 import type { ExtractedPage } from "./extract";
 
 const ChunkSchema = z.object({
@@ -30,6 +30,7 @@ export async function chunkExtractedText(sourceFileName: string, pages: Extracte
       "that is not present in the text. Record which page/section number each chunk came from.",
     prompt: `Source file: ${sourceFileName}\n\n${pagesBlock}`,
     output: Output.object({ schema: ChunkingResultSchema }),
+    providerOptions: { gateway: { models: GATEWAY_FALLBACK_MODELS } },
   });
 
   return output.chunks;

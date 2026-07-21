@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { streamText } from "ai";
-import { MODEL, hasApiKey, cachedSystem } from "@/lib/ai";
+import { MODEL, GATEWAY_FALLBACK_MODELS, hasApiKey, cachedSystem } from "@/lib/ai";
 import { hasLangfuse } from "@/lib/observability";
 import { logEvent } from "@/lib/events";
 import { buildSystemPrompt, fallbackReply, type Intent, type EslLevel } from "@/lib/tutor";
@@ -109,11 +109,23 @@ export async function POST(req: NextRequest) {
           system: cachedSystem(system),
           messages: [...priorTurns, { role: "user", content: userText }],
           experimental_telemetry: { isEnabled: hasLangfuse(), functionId: "tutor" },
+          providerOptions: { gateway: { models: GATEWAY_FALLBACK_MODELS } },
         });
+        let receivedAnyText = false;
         for await (const textDelta of result.textStream) {
+          receivedAnyText = true;
           controller.enqueue(jsonLine({ type: "delta", text: textDelta }));
         }
-        controller.enqueue(jsonLine({ type: "done", demo: false }));
+        // A model can fail (plan restriction, provider error) without ever
+        // throwing — result.textStream just completes empty. Without this
+        // check that surfaces as a silent "success" with nothing shown,
+        // exactly what happened with the original claude-opus-4.8 default.
+        if (!receivedAnyText) {
+          controller.enqueue(jsonLine({ type: "delta", text: "⚠️ The AI had a problem generating a reply. Please try again." }));
+          controller.enqueue(jsonLine({ type: "done", error: true }));
+        } else {
+          controller.enqueue(jsonLine({ type: "done", demo: false }));
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         controller.enqueue(jsonLine({ type: "delta", text: `⚠️ The AI had a problem: ${message}. Please try again.` }));

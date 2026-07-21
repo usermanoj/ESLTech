@@ -1,6 +1,6 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
-import { MODEL } from "@/lib/ai";
+import { MODEL, GATEWAY_FALLBACK_MODELS } from "@/lib/ai";
 import type { Question } from "@/lib/grade";
 
 const QuestionSchema = z.discriminatedUnion("kind", [
@@ -45,6 +45,7 @@ export async function generatePracticeQuestions(chunkHeading: string | null, chu
       "describes a formula or worked example; use a multiple-choice question only when a numeric answer doesn't fit.",
     prompt: `Approved material${chunkHeading ? ` ("${chunkHeading}")` : ""}:\n${chunkText}`,
     output: Output.object({ schema: z.object({ questions: z.array(GeneratedQuestionSchema) }) }),
+    providerOptions: { gateway: { models: GATEWAY_FALLBACK_MODELS } },
   });
 
   return output.questions;
