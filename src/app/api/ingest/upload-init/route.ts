@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = supabaseAdmin();
-  const results: { name: string; documentId: string; path: string; token: string }[] = [];
+  const results: { name: string; documentId: string; path: string; signedUrl: string }[] = [];
 
   for (const file of files) {
     const { data: doc, error } = await admin
@@ -101,8 +101,8 @@ export async function POST(req: NextRequest) {
     }
 
     const storagePath = `${doc.id}/${file.name}`;
-    const { path, token } = await createSignedUploadUrl(storagePath);
-    results.push({ name: file.name, documentId: doc.id, path, token });
+    const { path, signedUrl } = await createSignedUploadUrl(storagePath);
+    results.push({ name: file.name, documentId: doc.id, path, signedUrl });
   }
 
   return NextResponse.json({ files: results });

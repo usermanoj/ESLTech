@@ -17,10 +17,17 @@ import { CORPUS_BUCKET } from "@/lib/ingestion/bucket";
 // consistent with the "no public Storage RLS, everything gated server-side"
 // design, just with authorization decided before the byte transfer instead
 // of wrapping it.
-export async function createSignedUploadUrl(path: string): Promise<{ path: string; token: string }> {
+// Returns the complete signedUrl (token already embedded) as well, so the
+// browser can PUT straight to it with a plain fetch and doesn't need to load
+// @supabase/supabase-js at all — that library pulled a 244 kB client chunk
+// (GoTrue + Realtime, both unused here) into this route, which had to
+// download and parse before the page could hydrate.
+export async function createSignedUploadUrl(
+  path: string,
+): Promise<{ path: string; token: string; signedUrl: string }> {
   const { data, error } = await supabaseAdmin().storage.from(CORPUS_BUCKET).createSignedUploadUrl(path);
   if (error || !data) throw error ?? new Error("Failed to create signed upload URL");
-  return { path: data.path, token: data.token };
+  return { path: data.path, token: data.token, signedUrl: data.signedUrl };
 }
 
 export async function downloadCorpusFile(path: string): Promise<Buffer> {
