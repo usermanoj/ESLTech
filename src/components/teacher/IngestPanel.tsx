@@ -14,14 +14,16 @@ type Doc = TeacherDocument;
 // running) while it's pending with no chunks yet. Used both for the badge
 // and to decide whether to keep auto-polling.
 function isProcessing(doc: Doc): boolean {
-  return doc.status === "pending" && doc.chunks.length === 0;
+  // chunkCount, not chunks.length — collapsed documents intentionally ship
+  // without their text, so chunks.length would wrongly read as "processing".
+  return doc.status === "pending" && doc.chunkCount === 0;
 }
 
 // Sort so the things that need the teacher's attention float to the top and
 // finished (approved/rejected) material sinks below — instead of a flat
 // newest-first pile where one approved deck's chunks bury everything.
 function statusRank(doc: Doc): number {
-  if (doc.status === "pending" && doc.chunks.length > 0) return 0; // ready for review — needs a click
+  if (doc.status === "pending" && doc.chunkCount > 0) return 0; // ready for review — needs a click
   if (isProcessing(doc)) return 1; // in progress — just uploaded
   if (doc.status === "approved") return 2;
   return 3; // rejected
@@ -59,6 +61,8 @@ export default function IngestPanel() {
   // shown open; finished ones stay collapsed unless opened, so approving a
   // deck tidies it away instead of leaving its chunks on screen.
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  // Which document is currently fetching its chunk text after being expanded.
+  const [chunksLoadingId, setChunksLoadingId] = useState<string | null>(null);
   // Filenames shown as instant placeholder cards the moment Upload is
   // clicked, before any network call returns. Without this there's a dead
   // zone where nothing visibly happens, which is what makes people click
@@ -86,7 +90,16 @@ export default function IngestPanel() {
         setError((data.error as string | undefined) || "Couldn't load your uploads.");
         return;
       }
-      setDocuments((data.documents as Doc[] | undefined) ?? []);
+      const next = (data.documents as Doc[] | undefined) ?? [];
+      // Carry over chunk text already fetched for expanded documents — the
+      // list response omits it for collapsed ones, so a plain overwrite would
+      // blank out a deck the teacher currently has open.
+      setDocuments((prev) => {
+        const loaded = new Map(prev.filter((d) => d.chunks.length > 0).map((d) => [d.id, d.chunks]));
+        return next.map((d) =>
+          d.chunks.length === 0 && loaded.has(d.id) ? { ...d, chunks: loaded.get(d.id)! } : d,
+        );
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load your uploads.");
     } finally {
@@ -126,13 +139,36 @@ export default function IngestPanel() {
     if (doc.status === "pending") return true;
     return openIds.has(doc.id);
   }
-  function toggleOpen(id: string) {
+  async function toggleOpen(id: string) {
+    const opening = !openIds.has(id);
     setOpenIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (!opening) return;
+
+    // Collapsed documents ship without their chunk text (that's what keeps
+    // the list fast) — fetch it the first time one is expanded.
+    const doc = documents.find((d) => d.id === id);
+    if (!doc || doc.chunkCount === 0 || doc.chunks.length > 0) return;
+
+    setChunksLoadingId(id);
+    try {
+      const res = await fetch(`/api/ingest/chunks?documentId=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setError((data.error as string | undefined) || "Couldn't load this document's content.");
+        return;
+      }
+      const chunks = (data.chunks as Doc["chunks"] | undefined) ?? [];
+      setDocuments((prev) => prev.map((d) => (d.id === id ? { ...d, chunks } : d)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load this document's content.");
+    } finally {
+      setChunksLoadingId(null);
+    }
   }
 
   const sortedDocs = [...documents].sort((a, b) => {
@@ -469,8 +505,8 @@ export default function IngestPanel() {
               <div className="flex items-center gap-2 font-medium">
                 {collapsible && <span className="text-xs text-[var(--muted)]">{open ? "▾" : "▸"}</span>}
                 <span>{doc.source_file}</span>
-                {collapsible && doc.chunks.length > 0 && (
-                  <span className="text-xs font-normal text-[var(--muted)]">· {doc.chunks.length} chunks</span>
+                {collapsible && doc.chunkCount > 0 && (
+                  <span className="text-xs font-normal text-[var(--muted)]">· {doc.chunkCount} chunks</span>
                 )}
               </div>
               <StatusBadge status={doc.status} hasChunks={doc.chunks.length > 0} />
@@ -480,6 +516,10 @@ export default function IngestPanel() {
               <p className="mt-2 text-xs text-[var(--muted)]">
                 ✓ Uploaded — now extracting &amp; chunking in the background. This updates automatically.
               </p>
+            )}
+
+            {open && chunksLoadingId === doc.id && doc.chunks.length === 0 && (
+              <p className="mt-3 text-xs text-[var(--muted)]">Loading content…</p>
             )}
 
             {open && doc.chunks.length > 0 && (
@@ -495,7 +535,7 @@ export default function IngestPanel() {
               </div>
             )}
 
-            {doc.status === "pending" && doc.chunks.length > 0 && (
+            {doc.status === "pending" && doc.chunkCount > 0 && (
               <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => review(doc.id, true)}

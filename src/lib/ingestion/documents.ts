@@ -21,6 +21,14 @@ export type TeacherDocument = {
   source_file: string;
   status: "pending" | "approved" | "rejected";
   created_at: string;
+  // Always accurate, even when `chunks` is empty — the collapsed card shows
+  // this count, and "processing" means chunkCount === 0 (not chunks.length,
+  // which is empty by design for collapsed documents).
+  chunkCount: number;
+  // Populated only for documents the UI actually renders expanded (pending
+  // ones awaiting review). Approved/rejected documents render collapsed, so
+  // their chunk text is fetched on demand when expanded — see
+  // GET /api/ingest/chunks.
   chunks: TeacherChunk[];
 };
 
@@ -67,13 +75,32 @@ export async function listTeacherDocuments(teacherId: string): Promise<TeacherDo
 
   const docIds = docs.map((d) => d.id);
 
-  // Batched (3 queries total, not one-per-document/one-per-chunk) — scoped
-  // to at most MAX_DOCUMENTS documents' worth of chunks/questions by the
-  // .limit() above, so this stays fast regardless of total historical volume.
-  const { data: chunks, error: chunksError } = await admin
+  // Counts for every document, but *ids only* — no text. This is what the
+  // collapsed cards need, and it stays tiny no matter how much history has
+  // built up.
+  const { data: chunkIdRows, error: countError } = await admin
     .from("corpus_chunks")
-    .select("id, document_id, heading, text, citation")
+    .select("id, document_id")
     .in("document_id", docIds);
+  if (countError) throw countError;
+
+  const countByDocument = new Map<string, number>();
+  for (const row of chunkIdRows ?? []) {
+    countByDocument.set(row.document_id, (countByDocument.get(row.document_id) ?? 0) + 1);
+  }
+
+  // Full chunk text ONLY for documents the UI renders expanded — i.e. those
+  // still pending review. Approved/rejected documents render collapsed, so
+  // pulling their text here was pure waste: it dominated the payload and the
+  // query time while never being displayed. Their text loads on expand via
+  // GET /api/ingest/chunks instead.
+  const expandedDocIds = docs.filter((d) => d.status === "pending").map((d) => d.id);
+  const { data: chunks, error: chunksError } = expandedDocIds.length
+    ? await admin
+        .from("corpus_chunks")
+        .select("id, document_id, heading, text, citation")
+        .in("document_id", expandedDocIds)
+    : { data: [], error: null };
   if (chunksError) throw chunksError;
 
   const chunkIds = (chunks ?? []).map((c) => c.id);
@@ -102,5 +129,52 @@ export async function listTeacherDocuments(teacherId: string): Promise<TeacherDo
     chunksByDocument.set(document_id, list);
   }
 
-  return docs.map((doc) => ({ ...doc, chunks: chunksByDocument.get(doc.id) ?? [] }));
+  return docs.map((doc) => ({
+    ...doc,
+    chunkCount: countByDocument.get(doc.id) ?? 0,
+    chunks: chunksByDocument.get(doc.id) ?? [],
+  }));
+}
+
+// On-demand chunk loading for a single document — used when a teacher
+// expands an approved/rejected deck whose text the list deliberately didn't
+// ship. Scoped by teacherId so one teacher can never read another's.
+export async function getDocumentChunks(teacherId: string, documentId: string): Promise<TeacherChunk[] | null> {
+  const admin = supabaseAdmin();
+
+  const { data: doc, error: docError } = await admin
+    .from("corpus_documents")
+    .select("id")
+    .eq("id", documentId)
+    .eq("uploaded_by", teacherId)
+    .maybeSingle();
+  if (docError) throw docError;
+  if (!doc) return null;
+
+  const { data: chunks, error: chunksError } = await admin
+    .from("corpus_chunks")
+    .select("id, heading, text, citation")
+    .eq("document_id", documentId);
+  if (chunksError) throw chunksError;
+  if (!chunks || chunks.length === 0) return [];
+
+  const { data: questions, error: questionsError } = await admin
+    .from("generated_questions")
+    .select("id, chunk_id, level, prompt, question, status")
+    .in(
+      "chunk_id",
+      chunks.map((c) => c.id),
+    )
+    .neq("status", "rejected");
+  if (questionsError) throw questionsError;
+
+  const questionsByChunk = new Map<string, GeneratedQuestionRow[]>();
+  for (const q of questions ?? []) {
+    const { chunk_id, ...rest } = q;
+    const list = questionsByChunk.get(chunk_id) ?? [];
+    list.push(rest);
+    questionsByChunk.set(chunk_id, list);
+  }
+
+  return chunks.map((c) => ({ ...c, questions: questionsByChunk.get(c.id) ?? [] }));
 }
