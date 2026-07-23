@@ -1,23 +1,16 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { hasSupabase } from "@/lib/supabase/config";
-import { listTeacherDocuments } from "@/lib/ingestion/documents";
 import IngestPanel from "@/components/teacher/IngestPanel";
 
 export default async function TeacherIngestPage() {
-  const user = await requireRole("teacher", "/teacher/ingest");
-
-  let initialDocuments: Awaited<ReturnType<typeof listTeacherDocuments>> = [];
-  let loadError: string | null = null;
-  if (user) {
-    try {
-      initialDocuments = await listTeacherDocuments(user.id);
-    } catch (err) {
-      // Surfaced directly on the page rather than silently falling back to
-      // an empty list — that silence is exactly what hid a real bug once.
-      loadError = err instanceof Error ? err.message : "Failed to load your uploads.";
-    }
-  }
+  // Only the auth gate runs before the HTML is sent. The document list is
+  // deliberately NOT fetched here: it used to block the entire page behind
+  // an auth lookup plus three queries that pull every chunk's full text, so
+  // nothing rendered — not even the upload form — until all of it finished.
+  // The form doesn't depend on that data, so the panel now loads it itself
+  // and the page paints immediately (loading.tsx covers this auth check).
+  await requireRole("teacher", "/teacher/ingest");
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
@@ -38,12 +31,7 @@ export default async function TeacherIngestPage() {
         </div>
       ) : (
         <div className="mt-8">
-          {loadError && (
-            <div className="mb-4 rounded-2xl bg-[rgba(248,113,113,0.12)] p-4 text-sm text-[var(--bad)]">
-              Couldn&apos;t load your uploads: {loadError}
-            </div>
-          )}
-          <IngestPanel initialDocuments={initialDocuments} />
+          <IngestPanel />
         </div>
       )}
     </main>

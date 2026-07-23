@@ -40,13 +40,16 @@ async function safeJson(res: Response): Promise<{ error?: string; [key: string]:
   }
 }
 
-// Initial data comes from the server-rendered page (see
-// app/teacher/ingest/page.tsx) rather than a mount-time client fetch —
-// avoids a redundant round-trip and a setState-in-effect anti-pattern. The
-// "Refresh" button and post-action refreshes are plain event-handler calls,
-// not effects, so they're unaffected by that same concern.
-export default function IngestPanel({ initialDocuments }: { initialDocuments: Doc[] }) {
-  const [documents, setDocuments] = useState<Doc[]>(initialDocuments);
+// The document list is fetched here rather than server-rendered into the
+// page. It used to arrive as a prop, which meant the whole route — upload
+// form included — waited on an auth lookup plus three queries pulling every
+// chunk's full text before any HTML was sent. The form needs none of that,
+// so loading it here lets the page paint immediately and the list fill in.
+export default function IngestPanel() {
+  const [documents, setDocuments] = useState<Doc[]>([]);
+  // Distinguishes "still loading the first time" from "genuinely no uploads",
+  // so the empty state never flashes before the data arrives.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -79,10 +82,42 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
       // which made "Refresh" look like it did nothing — force a fresh read.
       const res = await fetch("/api/ingest/documents", { cache: "no-store" });
       const data = await safeJson(res);
+      if (!res.ok) {
+        setError((data.error as string | undefined) || "Couldn't load your uploads.");
+        return;
+      }
       setDocuments((data.documents as Doc[] | undefined) ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load your uploads.");
     } finally {
+      setLoadedOnce(true);
       setLoading(false);
     }
+  }, []);
+
+  // Initial load. Written inline rather than calling refresh() because
+  // refresh() flips its loading flag *synchronously* — a setState in the
+  // effect body, which react-hooks/set-state-in-effect (correctly) rejects.
+  // Here every state update happens after an await, and a cancelled flag
+  // stops a late response from writing into an unmounted component.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/ingest/documents", { cache: "no-store" });
+        const data = await safeJson(res);
+        if (cancelled) return;
+        if (!res.ok) setError((data.error as string | undefined) || "Couldn't load your uploads.");
+        else setDocuments((data.documents as Doc[] | undefined) ?? []);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Couldn't load your uploads.");
+      } finally {
+        if (!cancelled) setLoadedOnce(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function isOpen(doc: Doc): boolean {
@@ -411,7 +446,14 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
         </div>
       ))}
 
-      {documents.length === 0 && pendingNames.length === 0 && (
+      {!loadedOnce && pendingNames.length === 0 && (
+        <div className="space-y-4">
+          <div className="glass h-20 animate-pulse rounded-3xl" />
+          <div className="glass h-20 animate-pulse rounded-3xl" />
+        </div>
+      )}
+
+      {loadedOnce && documents.length === 0 && pendingNames.length === 0 && (
         <p className="text-sm text-[var(--muted)]">No uploads yet.</p>
       )}
 
