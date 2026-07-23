@@ -3,10 +3,34 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { TeacherDocument } from "@/lib/ingestion/documents";
 import { currentAcademicYear } from "@/lib/ingestion/academic-year";
-import { CORPUS_BUCKET } from "@/lib/ingestion/bucket";
-import { supabaseBrowser } from "@/lib/supabase/client";
 import { PRESSABLE } from "@/lib/ui";
 import ChunkQuestions from "./ChunkQuestions";
+
+// Uploads a file straight to the signed Storage URL with a plain fetch.
+//
+// This deliberately does NOT use @supabase/supabase-js: importing it here
+// pulled a 244 kB client chunk (GoTrue auth + the Realtime WebSocket client,
+// neither of which this page uses) into /teacher/ingest, which the browser
+// had to download and parse before the panel could hydrate — the reason this
+// route felt slow next to pages that import none of it.
+//
+// The wire format mirrors storage-js's own uploadToSignedUrl exactly: PUT to
+// the signed URL, multipart body with `cacheControl` and the file under the
+// empty-string key (see node_modules/@supabase/storage-js/src/packages/
+// StorageFileApi.ts).
+async function putToSignedUrl(signedUrl: string, file: File): Promise<string | null> {
+  const body = new FormData();
+  body.append("cacheControl", "3600");
+  body.append("", file);
+  try {
+    const res = await fetch(signedUrl, { method: "PUT", body });
+    if (res.ok) return null;
+    const text = await res.text().catch(() => "");
+    return text || `upload failed (${res.status})`;
+  } catch (err) {
+    return err instanceof Error ? err.message : "upload failed";
+  }
+}
 
 type Doc = TeacherDocument;
 
@@ -252,8 +276,8 @@ export default function IngestPanel() {
       const initData = await safeJson(initRes);
       if (!initRes.ok) throw new Error((initData.error as string | undefined) || "Upload failed.");
 
-      const targets = (initData.files as { name: string; documentId: string; path: string; token: string }[]) ?? [];
-      const supabase = supabaseBrowser();
+      const targets =
+        (initData.files as { name: string; documentId: string; path: string; signedUrl: string }[]) ?? [];
 
       // Upload every file in parallel (zipped by index — upload-init created
       // one document per file in the order received, and names aren't unique
@@ -265,12 +289,10 @@ export default function IngestPanel() {
           const file = fileList[i];
           if (!file) return `"${target.name}": file missing`;
 
-          const { error: uploadErr } = await supabase.storage
-            .from(CORPUS_BUCKET)
-            .uploadToSignedUrl(target.path, target.token, file);
+          const uploadErr = await putToSignedUrl(target.signedUrl, file);
           if (uploadErr) {
             setUploadProgress(`${(done += 1)}/${targets.length}`);
-            return `"${target.name}": ${uploadErr.message}`;
+            return `"${target.name}": ${uploadErr}`;
           }
 
           const completeRes = await fetch("/api/ingest/upload-complete", {
