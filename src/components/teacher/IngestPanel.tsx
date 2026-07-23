@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { TeacherDocument } from "@/lib/ingestion/documents";
 import { currentAcademicYear } from "@/lib/ingestion/academic-year";
 import { CORPUS_BUCKET } from "@/lib/ingestion/bucket";
@@ -8,6 +8,13 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import ChunkQuestions from "./ChunkQuestions";
 
 type Doc = TeacherDocument;
+
+// A document is still being extracted/chunked in the background (workflow
+// running) while it's pending with no chunks yet. Used both for the badge
+// and to decide whether to keep auto-polling.
+function isProcessing(doc: Doc): boolean {
+  return doc.status === "pending" && doc.chunks.length === 0;
+}
 
 // A response can be JSON (our own API routes) or plain text (a platform-
 // level rejection that never reached our code) — never assume .json() will
@@ -31,9 +38,11 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
   const [documents, setDocuments] = useState<Doc[]>(initialDocuments);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/ingest/documents");
@@ -42,7 +51,22 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  // Auto-poll while any document is still processing, so the list updates
+  // itself the moment extraction/chunking finishes — no manual refresh. The
+  // interval clears itself once nothing is processing (the effect re-runs on
+  // every documents change and simply doesn't re-arm), so it never polls
+  // idly. setState happens only inside the async interval callback (via
+  // refresh), never synchronously in the effect body.
+  const anyProcessing = documents.some(isProcessing);
+  useEffect(() => {
+    if (!anyProcessing) return;
+    const timer = setInterval(() => {
+      void refresh();
+    }, 3500);
+    return () => clearInterval(timer);
+  }, [anyProcessing, refresh]);
 
   // Two-step, direct-to-storage upload: file bytes never pass through our
   // own server (Vercel functions cap request bodies at ~4.5 MB, far below a
@@ -55,6 +79,7 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
   async function upload(form: FormData) {
     setError(null);
     setUploading(true);
+    setUploadProgress(null);
     try {
       const fileList = form.getAll("file").filter((f): f is File => f instanceof File);
       if (fileList.length === 0) throw new Error("Choose at least one file.");
@@ -75,46 +100,55 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
 
       const targets = (initData.files as { name: string; documentId: string; path: string; token: string }[]) ?? [];
       const supabase = supabaseBrowser();
-      const failures: string[] = [];
 
-      // Zipped by index, not name — upload-init created one document per
-      // file in the same order it received them, and names aren't
-      // guaranteed unique if a teacher picks the same file twice.
-      for (let i = 0; i < targets.length; i++) {
-        const target = targets[i];
-        const file = fileList[i];
-        if (!file) continue;
+      // Upload every file in parallel (zipped by index — upload-init created
+      // one document per file in the order received, and names aren't unique
+      // if the same file is picked twice). A slow deck no longer blocks the
+      // others, so a 3-file upload takes about as long as its largest file.
+      let done = 0;
+      const results = await Promise.all(
+        targets.map(async (target, i): Promise<string | null> => {
+          const file = fileList[i];
+          if (!file) return `"${target.name}": file missing`;
 
-        const { error: uploadErr } = await supabase.storage.from(CORPUS_BUCKET).uploadToSignedUrl(
-          target.path,
-          target.token,
-          file,
-        );
-        if (uploadErr) {
-          failures.push(`"${target.name}": ${uploadErr.message}`);
-          continue;
-        }
+          const { error: uploadErr } = await supabase.storage
+            .from(CORPUS_BUCKET)
+            .uploadToSignedUrl(target.path, target.token, file);
+          if (uploadErr) {
+            setUploadProgress(`${(done += 1)}/${targets.length}`);
+            return `"${target.name}": ${uploadErr.message}`;
+          }
 
-        const completeRes = await fetch("/api/ingest/upload-complete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ documentId: target.documentId, storagePath: target.path }),
-        });
-        if (!completeRes.ok) {
-          const completeData = await safeJson(completeRes);
-          failures.push(`"${target.name}": ${(completeData.error as string | undefined) || "failed to start processing"}`);
-        }
-      }
+          const completeRes = await fetch("/api/ingest/upload-complete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ documentId: target.documentId, storagePath: target.path }),
+          });
+          setUploadProgress(`${(done += 1)}/${targets.length}`);
+          if (!completeRes.ok) {
+            const completeData = await safeJson(completeRes);
+            return `"${target.name}": ${(completeData.error as string | undefined) || "failed to start processing"}`;
+          }
+          return null;
+        }),
+      );
 
+      const failures = results.filter((r): r is string => r !== null);
       if (failures.length > 0) {
         const okCount = targets.length - failures.length;
         setError(`${okCount}/${targets.length} file(s) uploaded. Failed — ${failures.join("; ")}`);
       }
+
+      // Clear the picked files so a second click can't silently re-upload
+      // the same deck (which is how the duplicate cards happened). Section/
+      // subject/grade are intentionally left as-is for the next upload.
+      if (fileInputRef.current) fileInputRef.current.value = "";
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -136,6 +170,7 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
         <div className="flex-1">
           <label className="mb-1 block text-xs text-[var(--muted)]">Files (.docx, .pdf, .pptx, .txt)</label>
           <input
+            ref={fileInputRef}
             type="file"
             name="file"
             accept=".docx,.pdf,.pptx,.txt"
@@ -186,7 +221,7 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
           disabled={uploading}
           className="rounded-xl bg-[var(--brand)] px-5 py-2 text-sm font-medium text-white transition hover:-translate-y-0.5 disabled:opacity-50"
         >
-          {uploading ? "Uploading…" : "Upload"}
+          {uploading ? (uploadProgress ? `Uploading ${uploadProgress}…` : "Uploading…") : "Upload"}
         </button>
       </form>
       <p className="text-xs text-[var(--muted)]">
@@ -197,9 +232,13 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
 
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-widest text-[var(--muted)]">Your uploads</h2>
-        <button onClick={refresh} disabled={loading} className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
-          {loading ? "Refreshing…" : "↻ Refresh"}
-        </button>
+        {anyProcessing ? (
+          <span className="text-xs text-[var(--warn)]">● Auto-updating while processing…</span>
+        ) : (
+          <button onClick={refresh} disabled={loading} className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
+            {loading ? "Refreshing…" : "↻ Refresh"}
+          </button>
+        )}
       </div>
 
       {documents.length === 0 && <p className="text-sm text-[var(--muted)]">No uploads yet.</p>}
@@ -211,8 +250,8 @@ export default function IngestPanel({ initialDocuments }: { initialDocuments: Do
             <StatusBadge status={doc.status} hasChunks={doc.chunks.length > 0} />
           </div>
 
-          {doc.status === "pending" && doc.chunks.length === 0 && (
-            <p className="mt-2 text-xs text-[var(--muted)]">Extracting and chunking — refresh in a moment.</p>
+          {isProcessing(doc) && (
+            <p className="mt-2 text-xs text-[var(--muted)]">Extracting and chunking — this updates automatically.</p>
           )}
 
           {doc.chunks.length > 0 && (
